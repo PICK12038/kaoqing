@@ -420,8 +420,11 @@ td.name input{width:100%;border:none;text-align:center;font-size:14px;font-weigh
 <div class="card">
   <div class="nav-box">
     <div class="row">
-      <label>班级：</label>
+      <button class="btn btn-sm" id="btn-view-mode" onclick="toggleViewMode()" style="margin-right:8px;font-size:12px;padding:5px 10px">📋 按班级</button>
+      <span class="tb-divider" style="margin:0 2px"></span>
+      <label id="nav-label">班级：</label>
       <div class="tab-group" id="class-tabs"></div>
+      <div class="tab-group" id="group-tabs" style="display:none"></div>
     </div>
   </div>
 
@@ -768,6 +771,7 @@ var currentClass='1班';
 var currentGroup='1组';
 var currentWeek=0; // 当前显示的周索引(0开始)
 var WEEK_SIZE=6;   // 每6天为一周
+var viewMode='class'; // 'class'=按班级显示4组, 'group'=按组显示4班
 var batchMode=false;
 
 // ====== 防抖存储：300ms内多次调用只保存一次 ======
@@ -941,6 +945,36 @@ function renderClassTabs(){
   document.getElementById('class-tabs').innerHTML=h;
 }
 
+// ====== 视图模式切换 ======
+window.toggleViewMode=function(){
+  viewMode=viewMode==='class'?'group':'class';
+  var btn=document.getElementById('btn-view-mode');
+  var ctEl=document.getElementById('class-tabs'),gtEl=document.getElementById('group-tabs');
+  var lbl=document.getElementById('nav-label');
+  
+  if(viewMode==='group'){
+    btn.textContent='📋 按组别';lbl.textContent='组别：';
+    ctEl.style.display='none';gtEl.style.display='';
+    var gh='';
+    for(var i=1;i<=4;i++){var gn=i+'组',active=gn===currentGroup?' active':'';gh+='<button class=\"tab-group-btn'+active+'\" onclick=\"onGroupViewChange(\''+gn+'\')\">'+gn+'</button>'}
+    gtEl.innerHTML=gh;
+  }else{
+    btn.textContent='📋 按班级';lbl.textContent='班级：';
+    ctEl.style.display='';gtEl.style.display='none';
+    renderClassTabs();
+  }
+  if(!batchMode) selectedCells={};
+  renderAllGroups();
+};
+
+window.onGroupViewChange=function(gn){
+  currentGroup=gn;
+  var btns=document.querySelectorAll('#group-tabs .tab-group-btn');
+  btns.forEach(function(b){b.classList.toggle('active',b.textContent===gn)});
+  if(!batchMode) selectedCells={};
+  renderAllGroups();
+};
+
 // ====== 切换 ======
 window.onClassChange=function(ct){
   if(!ct||CLASS_TYPES.indexOf(ct)===-1) return;
@@ -952,11 +986,12 @@ window.onClassChange=function(ct){
   addLog('切换班级','切换到 '+ct);
 };
 
-window.setActiveGroup=function(gn){
+window.setActiveGroupEx=function(gn,cn){
   if(batchMode) return;
   currentGroup=gn;
+  if(cn) currentClass=cn;
   document.querySelectorAll('.group-header').forEach(function(h){
-    h.classList.toggle('active',h.getAttribute('data-g')===gn);
+    h.classList.toggle('active',h.getAttribute('data-g')===gn&&h.getAttribute('data-c')===currentClass);
   });
 };
 
@@ -970,19 +1005,28 @@ window.toggleGroupBody=function(e,gn){
 
 // ====== 渲染全部4组 ======
 function renderAllGroups(){
-  // 边界保护：防止周索引越界
   if(currentWeek<0) currentWeek=0;
   if(currentWeek>=TOTAL_WEEKS) currentWeek=TOTAL_WEEKS-1;
   var container=document.getElementById('groups-container');
   if(!container) return;
   var h='';
-  for(var g=1;g<=4;g++){
-    var gn=g+'组';
-    h+=renderGroupSection(gn);
+  if(viewMode==='group'){
+    // 按组显示：遍历4个班级，每班显示该组
+    var gn=currentGroup;
+    for(var ci=0;ci<CLASS_TYPES.length;ci++){
+      var ct=CLASS_TYPES[ci];
+      h+=renderGroupSection(gn,ct);
+    }
+  }else{
+    // 按班级显示：遍历4个组
+    for(var g=1;g<=4;g++){
+      var gn2=g+'组';
+      h+=renderGroupSection(gn2);
+    }
   }
   container.innerHTML=h;
   document.querySelectorAll('.group-header').forEach(function(hd){
-    hd.classList.toggle('active',hd.getAttribute('data-g')===currentGroup);
+    hd.classList.toggle('active',hd.getAttribute('data-c')===currentClass&&hd.getAttribute('data-g')===currentGroup);
   });
   if(batchMode) document.getElementById('batch-count').textContent='已选 '+Object.keys(selectedCells).length+' 格';
   updateWeekNav();
@@ -1010,8 +1054,10 @@ function updateGlobalStats(){
   if(el) el.textContent=total+'人 · '+attRecords+'条记录';
 }
 
-function renderGroupSection(gn){
-  var t=DB.classes[currentClass]&&DB.classes[currentClass][gn];
+function renderGroupSection(gn,ct){
+  // ct参数可选，不传则用全局currentClass（班级模式）
+  var cName=ct||currentClass;
+  var t=DB.classes[cName]&&DB.classes[cName][gn];
   if(!t) return '';
   var allDates=safeDates(t); // 全部日期
   var dates=getWeekDates(t);  // 当前周的日期切片
@@ -1027,11 +1073,12 @@ function renderGroupSection(gn){
     });
   });
 
-  var isActive=gn===currentGroup;
-  var h='<div class="group-section" id="group-'+gn+'">';
-  h+='<div class="group-header'+(isActive?' active':'')+'" data-g="'+gn+'" onclick="setActiveGroup(\''+gn+'\');toggleGroupBody(event,\''+gn+'\')">';
-  h+='<span class="gh-toggle" id="gh-toggle-'+gn+'">▼</span>';
-  h+='<span class="gh-name">'+currentClass+' — '+gn+' <span style="font-size:11px;color:var(--accent);font-weight:500">[W'+(currentWeek+1)+']</span></span>';
+  var isActive=gn===currentGroup&&cName===currentClass;
+  var uid=viewMode==='group'?(cName.replace(/班/g,'b')+'-'+gn):gn; // 唯一ID
+  var h='<div class="group-section" id="group-'+uid+'">';
+  h+='<div class="group-header'+(isActive?' active':'')+'" data-g="'+gn+'" data-c="'+cName+'" onclick="setActiveGroupEx(\''+gn+'\',\''+cName+'\');toggleGroupBody(event,\''+uid+'\')">';
+  h+='<span class="gh-toggle" id="gh-toggle-'+uid+'">▼</span>';
+  h+='<span class="gh-name">'+cName+' — '+gn+' <span style="font-size:11px;color:var(--accent);font-weight:500">[W'+(currentWeek+1)+']</span></span>';
   h+='<span class="gh-info">'+students.length+'名学生 | '+attCount+'条记录</span>';
   h+='<div class="group-actions">';
   h+='<button class="btn btn-sm" onclick="event.stopPropagation();openTemplateImport(\''+gn+'\')">📥 导入</button>';
@@ -1080,8 +1127,8 @@ function renderGroupSection(gn){
         var gd=weekStart+d; // 全局日期索引
         var k=gd+'_'+p,v=(data[r]&&data[r][k])||'',st=STATUS[v]||{};
         var sty=st.bg?'background:'+st.bg+';color:'+st.fc:'';
-        var sk=gn+'_'+r+'_'+k;
-        h+='<td class="att'+(selectedCells[sk]?' selected':'')+'" data-r="'+r+'" data-k="'+k+'" data-g="'+gn+'" data-status="'+(v||'')+'">';
+        var sk=cName+'_'+gn+'_'+r+'_'+k;
+        h+='<td class="att'+(selectedCells[sk]?' selected':'')+'" data-r="'+r+'" data-k="'+k+'" data-g="'+gn+'" data-c="'+cName+'" data-status="'+(v||'')+'">';
         h+='<div class="val" style="'+(st.bg?'background:'+st.bg+';color:'+st.fc:'')+'">'+(v||'')+'</div><div class="dd-arrow" onclick="event.stopPropagation();onAttMenu(event,this.parentElement)">▾</div></td>';
       }
     }
@@ -1098,9 +1145,10 @@ function renderGroupSection(gn){
 
 function escH(s){if(!s)return'';return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
 
-function getTableByGroup(gn){
+function getTableByGroup(gn,ct){
   if(!gn) return null;
-  try{return (DB&&DB.classes&&DB.classes[currentClass])?DB.classes[currentClass][gn]:null}catch(e){return null}
+  var cName=ct||currentClass;
+  try{return (DB&&DB.classes&&DB.classes[cName])?DB.classes[cName][gn]:null}catch(e){return null}
 }
 
 // 安全获取日期数组（自动补齐到默认长度，保留用户编辑）
@@ -1249,8 +1297,8 @@ window.pickAttStatus=function(st){
   var td=menuEl&&menuEl._targetTd;
   closeAttMenu(); // 先取td再关闭
   if(!td) return;
-  var r=td.getAttribute('data-r'),k=td.getAttribute('data-k'),gn=td.getAttribute('data-g');
-  var t=getTableByGroup(gn);if(!t) return;
+  var r=td.getAttribute('data-r'),k=td.getAttribute('data-k'),gn=td.getAttribute('data-g'),cn=td.getAttribute('data-c')||currentClass;
+  var t=getTableByGroup(gn,cn);if(!t) return;
   updateAttCell(t,td,r,k,gn,st);
 };
 
@@ -1261,8 +1309,8 @@ function closeAttMenu(){
 
 // 批量模式：点击选中/取消选中格子
 function toggleBatchCell(td){
-  var r=td.getAttribute('data-r'),k=td.getAttribute('data-k'),gn=td.getAttribute('data-g');
-  var key=gn+'_'+r+'_'+k;
+  var r=td.getAttribute('data-r'),k=td.getAttribute('data-k'),gn=td.getAttribute('data-g'),cn=td.getAttribute('data-c')||currentClass;
+  var key=cn+'_'+gn+'_'+r+'_'+k;
   if(selectedCells[key]){delete selectedCells[key];td.classList.remove('selected')}
   else{selectedCells[key]=true;td.classList.add('selected')}
   updateBatchCount();
@@ -1619,19 +1667,22 @@ window.batchApplyQuick=function(st){
   var groups={},errorCount=0;
   keys.forEach(function(key){
     var parts=key.split('_');
-    if(parts.length<3){errorCount++;return}
-    var gn=parts[0],r=parts[1],k=parts.slice(2).join('_');
-    if(!gn||!r||k===undefined){errorCount++;return}
-    if(!groups[gn]) groups[gn]={};
-    if(!groups[gn][r]) groups[gn][r]={};
-    groups[gn][r][k]=st==='CLEAR'?undefined:st;
+    if(parts.length<4){errorCount++;return}
+    var cn=parts[0],gn=parts[1],r=parts[2],k=parts.slice(3).join('_');
+    if(!cn||!gn||!r||k===undefined){errorCount++;return}
+    if(!groups[cn]) groups[cn]={};
+    if(!groups[cn][gn]) groups[cn][gn]={};
+    if(!groups[cn][gn][r]) groups[cn][gn][r]={};
+    groups[cn][gn][r][k]=st==='CLEAR'?undefined:st;
   });
-  Object.keys(groups).forEach(function(gn){
-    var t=getTableByGroup(gn);if(!t) return;
-    Object.keys(groups[gn]).forEach(function(r){
-      if(!t.data[r]) t.data[r]={rm:''};
-      Object.keys(groups[gn][r]).forEach(function(k){
-        if(groups[gn][r][k]){t.data[r][k]=groups[gn][r][k]}else{delete t.data[r][k]}
+  Object.keys(groups).forEach(function(cn){
+    Object.keys(groups[cn]).forEach(function(gn){
+      var t=getTableByGroup(gn,cn);if(!t) return;
+      Object.keys(groups[cn][gn]).forEach(function(r){
+        if(!t.data[r]) t.data[r]={rm:''};
+        Object.keys(groups[cn][gn][r]).forEach(function(k){
+          if(groups[cn][gn][r][k]){t.data[r][k]=groups[cn][gn][r][k]}else{delete t.data[r][k]}
+        });
       });
     });
   });
@@ -1645,14 +1696,18 @@ window.batchApplyQuick=function(st){
 
 window.batchSelectRow=function(){
   if(!batchMode) return;
-  var rows=document.querySelectorAll('#group-'+currentGroup+' .att-table tbody tr');
+  var rows=document.querySelectorAll(gSel()+' .att-table tbody tr');
   rows.forEach(function(tr){
     var tds=tr.querySelectorAll('td.att');
     tds.forEach(function(td){td.click()});
   });
 };
 
-// ====== 批量模式 ======
+// ====== 批量模式辅助 ======
+function gSel(){
+  if(viewMode==='group') return '#group-'+currentClass.replace(/班/g,'b')+'-'+currentGroup;
+  return '#group-'+currentGroup;
+}
 var selectedCells={};
 
 window.toggleBatchMode=function(){
@@ -1672,7 +1727,7 @@ window.batchClearSel=function(){
 // 全选当前组所有考勤格
 window.batchSelectAll=function(){
   if(!batchMode) return;
-  var tds=document.querySelectorAll('#group-'+currentGroup+' td.att');
+  var tds=document.querySelectorAll(gSel()+' td.att');
   tds.forEach(function(td){
     var r=td.getAttribute('data-r'),k=td.getAttribute('data-k'),gn=td.getAttribute('data-g');
     var key=gn+'_'+r+'_'+k;
@@ -1693,7 +1748,7 @@ window.batchSelectCol=function(){
   var choice=parseInt(prompt(msg,'1'),10);
   if(isNaN(choice)||choice<1||choice>dates.length) return;
   var dIdx=choice-1;
-  var tds=document.querySelectorAll('#group-'+currentGroup+' td.att');
+  var tds=document.querySelectorAll(gSel()+' td.att');
   tds.forEach(function(td){
     var k=td.getAttribute('data-k');
     // k格式为 "d_p"，如"0_0"
@@ -1710,7 +1765,7 @@ window.batchSelectCol=function(){
 // 反选
 window.batchInvert=function(){
   if(!batchMode) return;
-  var tds=document.querySelectorAll('#group-'+currentGroup+' td.att');
+  var tds=document.querySelectorAll(gSel()+' td.att');
   tds.forEach(function(td){
     var r=td.getAttribute('data-r'),k=td.getAttribute('data-k'),gn=td.getAttribute('data-g');
     var key=gn+'_'+r+'_'+k;
@@ -2897,8 +2952,8 @@ document.addEventListener('click',function(e){
   var td=e.target.closest('td.att');if(!td) return;
   if(e.target.closest('.dd-arrow')) return; // 箭头由onAttMenu处理
   if(batchMode){toggleBatchCell(td);return}
-  var r=td.getAttribute('data-r'),k=td.getAttribute('data-k'),gn=td.getAttribute('data-g');
-  var t=getTableByGroup(gn);if(!t) return;
+  var r=td.getAttribute('data-r'),k=td.getAttribute('data-k'),gn=td.getAttribute('data-g'),cn=td.getAttribute('data-c')||currentClass;
+  var t=getTableByGroup(gn,cn);if(!t) return;
   var cur=td.getAttribute('data-status')||'';
   var idx=CYCLE.indexOf(cur)+1;if(idx>=CYCLE.length) idx=0;
   updateAttCell(t,td,r,k,gn,CYCLE[idx],cur||'(空)');
