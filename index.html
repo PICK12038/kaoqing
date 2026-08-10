@@ -2906,13 +2906,23 @@ function saveSyncConfig(token,repo,code){
 
 function simpleHash(s){var h=0;for(var i=0;i<s.length;i++){h=((h<<5)-h)+s.charCodeAt(i);h|=0}return h}
 
-function ghRawUrl(){
-  var br=_syncBranch||'main';
-  return 'https://raw.githubusercontent.com/'+_syncRepo+'/'+br+'/'+encodeURIComponent(_syncCode)+'.json';
-}
 function ghApiUrl(){
   var br=_syncBranch||'main';
   return 'https://api.github.com/repos/'+_syncRepo+'/contents/'+encodeURIComponent(_syncCode)+'.json?ref='+br;
+}
+
+// 用GitHub API读取数据（API即时无CDN缓存，raw有缓存延迟）
+function ghRead(){
+  return fetch(ghApiUrl(),{headers:{'Authorization':'Bearer '+_syncToken,'Accept':'application/vnd.github+json'}})
+    .then(function(r){if(r.status===404) return null;if(!r.ok) throw new Error('读取失败 HTTP '+r.status);return r.json()})
+    .then(function(meta){
+      if(!meta||!meta.content) return null;
+      _syncSha=meta.sha;
+      try{
+        var decoded=JSON.parse(decodeURIComponent(escape(atob(meta.content.replace(/\n/g,'')))));
+        return decoded&&decoded.data?decoded.data:null;
+      }catch(e){return null}
+    });
 }
 
 // 探测仓库默认分支
@@ -2971,15 +2981,12 @@ window.connectSync=function(){
   
   detectBranch().then(function(){
     msgEl.textContent='⏳ 拉取数据中 ('+_syncBranch+'分支)...';
-    return fetch(ghRawUrl());
-  }).then(function(r){
-    if(!r.ok){if(r.status===404) return null;throw new Error('读取失败 HTTP '+r.status)}
-    return r.json();
+    return ghRead();
   }).then(function(remote){
-    if(remote&&remote.data){
+    if(remote){
       // 合并式拉取：本地+云端合并，两边的数据都保留
       var localCopy=JSON.parse(JSON.stringify(DB));
-      var merged=mergeData(localCopy,remote.data);
+      var merged=mergeData(localCopy,remote);
       localStorage.setItem(SK,JSON.stringify(merged));
       DB=merged;renderAllGroups();
       msgEl.textContent='✅ 已合并共享数据（本地+云端）';
@@ -3044,15 +3051,14 @@ function startPolling(){
   _syncConnected=true;
   _syncInterval=setInterval(function(){
     if(!_syncConnected) return;
-    fetch(ghRawUrl()+'?t='+Date.now())
-      .then(function(r){if(!r.ok) return null;return r.json()})
+    ghRead()
       .then(function(remote){
-        if(!remote||!remote.data) return;
-        var h=simpleHash(JSON.stringify(remote.data));
+        if(!remote) return;
+        var h=simpleHash(JSON.stringify(remote));
         if(h!==_lastLocalHash&&Date.now()-_lastLocalSave>1500){
           var before=JSON.stringify(DB);
           var localCopy=JSON.parse(JSON.stringify(DB));
-          var merged=mergeData(localCopy,remote.data);
+          var merged=mergeData(localCopy,remote);
           var after=JSON.stringify(merged);
           localStorage.setItem(SK,JSON.stringify(merged));
           DB=merged;renderAllGroups();
@@ -3131,16 +3137,13 @@ function hasRealLocalData(){
     if(!t||!r||!c) return;
     _syncToken=t;_syncRepo=r;_syncCode=c;
     detectBranch().then(function(){
-      return fetch(ghRawUrl());
-    }).then(function(resp){
-      if(!resp.ok){if(resp.status===404) return null;throw new Error('HTTP '+resp.status)}
-      return resp.json();
+      return ghRead();
     }).then(function(remote){
-      if(remote&&remote.data){
+      if(remote){
         // 合并式：保留本地数据 + 补上云端数据
         try{
           var localCopy=JSON.parse(JSON.stringify(DB));
-          var merged=mergeData(localCopy,remote.data);
+          var merged=mergeData(localCopy,remote);
           localStorage.setItem(SK,JSON.stringify(merged));
           DB=merged;renderAllGroups();
         }catch(e){}
