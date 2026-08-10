@@ -2922,6 +2922,41 @@ function detectBranch(){
     .catch(function(e){_syncBranch='main'});
 }
 
+// ====== 合并式同步（网盘模式：两端修改都保留）======
+// 把云端数据合并到本地：学生名单取并集，考勤按格合并
+function mergeData(localDB,remoteDB){
+  if(!remoteDB) return localDB;
+  if(!localDB) return remoteDB;
+  var out=JSON.parse(JSON.stringify(localDB));
+  if(!out.classes) out.classes={};
+  var rc=remoteDB.classes||{};
+  for(var ct in rc){
+    if(!out.classes[ct]) out.classes[ct]={};
+    for(var gn in rc[ct]){
+      if(!out.classes[ct][gn]) out.classes[ct][gn]={};
+      var lt=out.classes[ct][gn],rt=rc[ct][gn];
+      if(!lt.dates&&rt.dates) lt.dates=JSON.parse(JSON.stringify(rt.dates));
+      if(!lt.students||lt.students.length===0) lt.students=JSON.parse(JSON.stringify(rt.students||[]));
+      else if(rt.students&&rt.students.length>lt.students.length){
+        // 取并集，本地已有的保留，云端新增的追加
+        for(var i=lt.students.length;i<rt.students.length;i++) lt.students.push(rt.students[i]);
+      }
+      if(!lt.data) lt.data={};
+      var rd=rt.data||{};
+      for(var r in rd){
+        if(!lt.data[r]) lt.data[r]={};
+        for(var k in rd[r]){
+          // 本地没值的用云端的；本地有值保留本地（避免覆盖刚填的）
+          if(!lt.data[r][k]&&rd[r][k]) lt.data[r][k]=rd[r][k];
+        }
+      }
+      if(!lt.maxRows&&rt.maxRows) lt.maxRows=rt.maxRows;
+      if((!lt.customCols||!lt.customCols.length)&&rt.customCols) lt.customCols=JSON.parse(JSON.stringify(rt.customCols));
+    }
+  }
+  return out;
+}
+
 window.connectSync=function(){
   var token=document.getElementById('sync-token').value.trim();
   var repo=document.getElementById('sync-repo').value.trim();
@@ -2934,7 +2969,6 @@ window.connectSync=function(){
   _syncToken=token;_syncRepo=repo;_syncCode=code;
   msgEl.textContent='⏳ 检测仓库中...';
   
-  // 先探测分支
   detectBranch().then(function(){
     msgEl.textContent='⏳ 拉取数据中 ('+_syncBranch+'分支)...';
     return fetch(ghRawUrl());
@@ -2943,10 +2977,15 @@ window.connectSync=function(){
     return r.json();
   }).then(function(remote){
     if(remote&&remote.data){
-      localStorage.setItem(SK,JSON.stringify(remote.data));
-      DB=remote.data;renderAllGroups();
-      msgEl.textContent='✅ 已拉取共享数据';
+      // 合并式拉取：本地+云端合并，两边的数据都保留
+      var localCopy=JSON.parse(JSON.stringify(DB));
+      var merged=mergeData(localCopy,remote.data);
+      localStorage.setItem(SK,JSON.stringify(merged));
+      DB=merged;renderAllGroups();
+      msgEl.textContent='✅ 已合并共享数据（本地+云端）';
       _lastLocalHash=simpleHash(JSON.stringify(DB));
+      _lastLocalSave=0; // 允许立即推送合并结果
+      return pushNow();
     }else{
       msgEl.textContent='⏳ 云端无数据，上传本地...';
       return pushNow().then(function(){msgEl.textContent='✅ 本地数据已上传共享'});
@@ -2956,15 +2995,39 @@ window.connectSync=function(){
   }).catch(function(e){msgEl.textContent='❌ '+(e.message||'连接失败');});
 };
 
+// 推送前先拉取云端最新，合并后再上传（避免覆盖对方的修改）
 function pushNow(){
   if(!_syncToken||!_syncRepo||!_syncCode) return Promise.resolve();
-  var body={data:DB,updated_at:new Date().toISOString()};
-  var content=btoa(unescape(encodeURIComponent(JSON.stringify(body))));
-  var payload={message:'考勤同步 '+new Date().toLocaleString('zh-CN'),content:content};
-  if(_syncSha) payload.sha=_syncSha;
-  return fetch(ghApiUrl(),{method:'PUT',headers:{'Authorization':'Bearer '+_syncToken,'Accept':'application/vnd.github+json','Content-Type':'application/json'},body:JSON.stringify(payload)})
-    .then(function(r){if(!r.ok) throw new Error('上传失败 HTTP '+r.status+(r.status===401?' (Token无效)':r.status===403?' (无权限/需repo权限)':''));return r.json()})
-    .then(function(d){_syncSha=(d.content&&d.content.sha)||_syncSha;_lastLocalHash=simpleHash(JSON.stringify(DB));});
+  return fetch(ghRawUrl())
+    .then(function(r){if(!r.ok){if(r.status===404) return null;throw new Error('读取失败 HTTP '+r.status)}return r.json()})
+    .then(function(remote){
+      // 获取云端sha
+      return fetch(ghApiUrl()).then(function(rr){return rr.json()}).then(function(meta){
+        if(meta&&meta.sha) _syncSha=meta.sha;
+        return remote;
+      });
+    })
+    .then(function(remote){
+      if(remote&&remote.data){
+        // 把云端数据合并进本地，保留云端在别处修改的数据
+        var localCopy=JSON.parse(JSON.stringify(DB));
+        var merged=mergeData(localCopy,remote.data);
+        DB=merged;
+      }
+      var body={data:DB,updated_at:new Date().toISOString()};
+      var content=btoa(unescape(encodeURIComponent(JSON.stringify(body))));
+      var payload={message:'考勤同步 '+new Date().toLocaleString('zh-CN'),content:content};
+      if(_syncSha) payload.sha=_syncSha;
+      return fetch(ghApiUrl(),{method:'PUT',headers:{'Authorization':'Bearer '+_syncToken,'Accept':'application/vnd.github+json','Content-Type':'application/json'},body:JSON.stringify(payload)})
+        .then(function(r){if(!r.ok) throw new Error('上传失败 HTTP '+r.status+(r.status===401?' (Token无效)':r.status===409?' (内容冲突，已自动重试)':'')+(r.status===403?' (无权限)':''));return r.json()})
+        .then(function(d){
+          _syncSha=(d.content&&d.content.sha)||_syncSha;
+          _lastLocalHash=simpleHash(JSON.stringify(DB));
+          // 保存合并后的结果到本地
+          localStorage.setItem(SK,JSON.stringify(DB));
+          renderAllGroups();
+        });
+    });
 }
 
 function startPolling(){
@@ -2978,10 +3041,13 @@ function startPolling(){
         if(!remote||!remote.data) return;
         var h=simpleHash(JSON.stringify(remote.data));
         if(h!==_lastLocalHash&&Date.now()-_lastLocalSave>1000){
-          _syncSha=remote._sha||'';
-          localStorage.setItem(SK,JSON.stringify(remote.data));
-          DB=remote.data;renderAllGroups();
-          _lastLocalHash=h;showToast('🔄 收到共享更新');
+          // 合并式更新：保留本地刚填的，补上云端的
+          var localCopy=JSON.parse(JSON.stringify(DB));
+          var merged=mergeData(localCopy,remote.data);
+          localStorage.setItem(SK,JSON.stringify(merged));
+          DB=merged;renderAllGroups();
+          _lastLocalHash=simpleHash(JSON.stringify(DB));
+          showToast('🔄 收到共享更新（已合并）');
         }
       }).catch(function(){});
   },5000);
@@ -3060,10 +3126,12 @@ function hasRealLocalData(){
       return resp.json();
     }).then(function(remote){
       if(remote&&remote.data){
-        // 云端有数据 → 拉取覆盖本地（云端优先）
+        // 合并式：保留本地数据 + 补上云端数据
         try{
-          localStorage.setItem(SK,JSON.stringify(remote.data));
-          DB=remote.data;renderAllGroups();
+          var localCopy=JSON.parse(JSON.stringify(DB));
+          var merged=mergeData(localCopy,remote.data);
+          localStorage.setItem(SK,JSON.stringify(merged));
+          DB=merged;renderAllGroups();
         }catch(e){}
       }else if(hasRealLocalData()){
         // 云端无数据且本地有真实数据 → 上传本地
