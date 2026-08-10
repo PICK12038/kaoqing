@@ -2884,7 +2884,7 @@ function showToast(msg){
 // 内置默认同步配置（打开页面自动同步，无需手动配置）
 // Token拆两段存储，运行时拼接（避免GitHub secret扫描拦截）
 var _DEFAULT_SYNC={token:'ghp_rHurmyzgnW5b'+'VRB7p10Hyrz9a5kvnl2Dw4ym',repo:'PICK12038/kaoqing',code:'hz-art-2026'};
-var _syncToken='',_syncRepo='',_syncCode='',_syncConnected=false,_syncSha='',_syncBranch='main',_syncDebounce=null,_syncInterval=null,_lastLocalHash='';
+var _syncToken='',_syncRepo='',_syncCode='',_syncConnected=false,_syncSha='',_syncBranch='main',_syncDebounce=null,_syncInterval=null,_lastLocalHash='',_rateLimitedUntil=0;
 
 window.toggleSyncModal=function(){
   var d=document.getElementById('modal-sync');d.classList.toggle('show');loadSyncConfig();
@@ -2913,8 +2913,19 @@ function ghApiUrl(){
 
 // 用GitHub API读取数据（API即时无CDN缓存，raw有缓存延迟）
 function ghRead(){
+  if(_rateLimitedUntil&&Date.now()<_rateLimitedUntil) return Promise.resolve(null);
   return fetch(ghApiUrl(),{headers:{'Authorization':'Bearer '+_syncToken,'Accept':'application/vnd.github+json'}})
-    .then(function(r){if(r.status===404) return null;if(!r.ok) throw new Error('读取失败 HTTP '+r.status);return r.json()})
+    .then(function(r){
+      if(r.status===404) return null;
+      if(r.status===403){
+        // 限流：暂停轮询60秒
+        _rateLimitedUntil=Date.now()+60000;
+        console.warn('GitHub API限流，暂停同步60秒');
+        return null;
+      }
+      if(!r.ok) throw new Error('读取失败 HTTP '+r.status);
+      return r.json();
+    })
     .then(function(meta){
       if(!meta||!meta.content) return null;
       _syncSha=meta.sha;
@@ -3049,26 +3060,39 @@ function pushNow(retry){
 function startPolling(){
   if(_syncInterval) clearInterval(_syncInterval);
   _syncConnected=true;
+  // 2秒快速轮询
   _syncInterval=setInterval(function(){
     if(!_syncConnected) return;
-    ghRead()
-      .then(function(remote){
-        if(!remote) return;
-        var h=simpleHash(JSON.stringify(remote));
-        if(h!==_lastLocalHash&&Date.now()-_lastLocalSave>1500){
-          var before=JSON.stringify(DB);
-          var localCopy=JSON.parse(JSON.stringify(DB));
-          var merged=mergeData(localCopy,remote);
-          var after=JSON.stringify(merged);
-          localStorage.setItem(SK,JSON.stringify(merged));
-          DB=merged;renderAllGroups();
-          _lastLocalHash=simpleHash(JSON.stringify(DB));
-          // 只有真正新增了数据才提示（避免刷屏）
-          if(after!==before) showToast('🔄 收到共享更新');
-        }
-      }).catch(function(){});
-  },5000);
+    pollOnce();
+  },2000);
 }
+
+function pollOnce(){
+  ghRead()
+    .then(function(remote){
+      if(!remote) return;
+      var h=simpleHash(JSON.stringify(remote));
+      if(h!==_lastLocalHash&&Date.now()-_lastLocalSave>1500){
+        var before=JSON.stringify(DB);
+        var localCopy=JSON.parse(JSON.stringify(DB));
+        var merged=mergeData(localCopy,remote);
+        var after=JSON.stringify(merged);
+        localStorage.setItem(SK,JSON.stringify(merged));
+        DB=merged;renderAllGroups();
+        _lastLocalHash=simpleHash(JSON.stringify(DB));
+        // 只有真正新增了数据才提示（避免刷屏）
+        if(after!==before) showToast('🔄 收到共享更新');
+      }
+    }).catch(function(){});
+}
+
+// 页面重新获得焦点时立即同步一次
+document.addEventListener('visibilitychange',function(){
+  if(!document.hidden&&_syncConnected) pollOnce();
+});
+window.addEventListener('focus',function(){
+  if(_syncConnected) pollOnce();
+});
 
 var _lastLocalSave=0;
 var _origDoSave=_doSave;
