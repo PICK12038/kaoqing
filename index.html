@@ -494,7 +494,17 @@ td.name input{width:100%;border:none;text-align:center;font-size:14px;font-weigh
 <!-- ====== 导出多选弹窗 ====== -->
 <div class="modal-overlay" id="modal-export">
   <div class="modal-card">
-    <h2>📦 选择要导出的表格</h2>
+    <h2>📦 导出数据</h2>
+    <div style="font-size:13px;color:var(--text2);margin-bottom:10px;line-height:1.6">
+      💡 <b>一键备份</b>（整个系统所有班级/组/考勤记录）：<br>
+      导出JSON文件 → 微信发给其他老师 → 对方打开系统导入即可。
+    </div>
+    <div style="display:flex;gap:8px;margin:10px 0">
+      <button class="btn btn-a" onclick="exportFullBackup()" style="flex:1">⬇ 导出完整备份(JSON)</button>
+    </div>
+    <div style="border-top:1px solid var(--border);margin:10px 0;padding-top:10px;font-size:13px;color:var(--text3)">
+      或按表格单独导出：
+    </div>
     <div id="export-checklist"></div>
     <div style="display:flex;gap:8px;margin:12px 0">
       <button class="btn btn-sm" onclick="exportCheckAll(true)">全选</button>
@@ -502,7 +512,7 @@ td.name input{width:100%;border:none;text-align:center;font-size:14px;font-weigh
     </div>
     <div class="modal-actions">
       <button class="btn" onclick="closeModal('modal-export')">取消</button>
-      <button class="btn btn-a" onclick="doExportZip()">导出为 ZIP</button>
+      <button class="btn" onclick="doExportZip()">导出为 ZIP</button>
     </div>
   </div>
 </div>
@@ -513,6 +523,13 @@ td.name input{width:100%;border:none;text-align:center;font-size:14px;font-weigh
 <div class="modal-overlay" id="modal-import">
   <div class="modal-card" style="width:720px">
     <h2>📥 导入数据 — <span id="import-label">当前：</span></h2>
+
+    <!-- 全量恢复备份 -->
+    <div style="font-size:13px;color:var(--text2);margin-bottom:10px;padding:10px;background:var(--bg);border:1px dashed var(--accent);border-radius:8px;line-height:1.6">
+      💡 <b>恢复完整备份</b>（覆盖全部班级/组/考勤）：<br>
+      选择别人发给你的 <b>JSON备份文件</b> 即可一键恢复。
+      <button class="btn btn-sm btn-a" onclick="restoreFullBackup()" style="margin-top:8px;display:block">⬆ 选择JSON备份文件并恢复</button>
+    </div>
 
     <!-- Tab切换 -->
     <div class="seg-tabs" id="import-tabs">
@@ -674,6 +691,7 @@ td.name input{width:100%;border:none;text-align:center;font-size:14px;font-weigh
       <button class="btn" onclick="closeModal('modal-sync')">取消</button>
       <button class="btn btn-a" id="btn-sync-connect" onclick="connectSync()">🔗 连接</button>
       <button class="btn btn-r" id="btn-sync-disconnect" onclick="disconnectSync()" style="display:none">断开</button>
+      <button class="btn btn-a" id="btn-sync-upload" onclick="forceUploadSync()" style="display:none">⬆ 强制上传本地数据</button>
     </div>
   </div>
 </div>
@@ -762,7 +780,7 @@ function generateDefaultDates(){
 var DEFAULT_DATES=generateDefaultDates();
 
 // ====== 班级类型 ======
-var CLASS_TYPES=['1班','2班','3班','4班'];
+var CLASS_TYPES=['1班','2班','3班','4班','丰泰班'];
 
 // ====== 全局状态 ======
 var SK='att_sys_v3';
@@ -2359,6 +2377,53 @@ function buildCSV(className,groupName){
   return lines.join('\n');
 }
 
+// ====== 全量备份/恢复 ======
+function downloadFile(content,name,mime){
+  var blob=content instanceof Blob?content:new Blob([content],{type:mime||'application/octet-stream'});
+  var a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=name;
+  document.body.appendChild(a);a.click();
+  document.body.removeChild(a);URL.revokeObjectURL(a.href);
+}
+
+window.exportFullBackup=function(){
+  var backup={__attBackup__:3,exportedAt:new Date().toISOString(),data:DB};
+  var json=JSON.stringify(backup);
+  downloadFile(json,'考勤备份_'+new Date().toISOString().slice(0,10)+'.json','application/json');
+  showToast('✅ 完整备份已导出');
+};
+
+window.restoreFullBackup=function(){
+  if(!confirm('恢复备份将【覆盖】当前所有数据！\n建议先导出一份当前备份。\n\n确定继续吗？')) return;
+  var inp=document.createElement('input');
+  inp.type='file';inp.accept='.json,application/json';
+  inp.onchange=function(){
+    var f=inp.files&&inp.files[0];
+    if(!f) return;
+    var reader=new FileReader();
+    reader.onload=function(){
+      try{
+        var obj=JSON.parse(reader.result);
+        if(!obj.__attBackup__||!obj.data){showToast('❌ 不是有效的备份文件');return}
+        DB=obj.data;
+        // 补齐班级结构
+        if(!DB.version) DB.version=3;
+        if(!DB.recycleBin) DB.recycleBin=[];
+        if(!DB.historyLog) DB.historyLog=[];
+        if(!DB.periodNames) DB.periodNames=['上午','下午','晚上'];
+        saveDBForce();
+        verifyDataIntegrity();
+        renderClassTabs();renderAllGroups();
+        closeModal('modal-import');
+        showToast('✅ 备份已恢复');
+      }catch(e){showToast('❌ 备份文件解析失败')}
+    };
+    reader.readAsText(f);
+  };
+  inp.click();
+};
+
 // ====== 多选导出ZIP ======
 window.openExportModal=function(){
   var h='';
@@ -2816,7 +2881,7 @@ function showToast(msg){
 }
 
 // ====== 云同步系统（GitHub）======
-var _syncToken='',_syncRepo='',_syncCode='',_syncConnected=false,_syncSha='',_syncDebounce=null,_syncInterval=null,_lastLocalHash='';
+var _syncToken='',_syncRepo='',_syncCode='',_syncConnected=false,_syncSha='',_syncBranch='main',_syncDebounce=null,_syncInterval=null,_lastLocalHash='';
 
 window.toggleSyncModal=function(){
   var d=document.getElementById('modal-sync');d.classList.toggle('show');loadSyncConfig();
@@ -2838,8 +2903,21 @@ function saveSyncConfig(token,repo,code){
 
 function simpleHash(s){var h=0;for(var i=0;i<s.length;i++){h=((h<<5)-h)+s.charCodeAt(i);h|=0}return h}
 
-function ghRawUrl(){return 'https://raw.githubusercontent.com/'+_syncRepo+'/main/'+encodeURIComponent(_syncCode)+'.json'}
-function ghApiUrl(){return 'https://api.github.com/repos/'+_syncRepo+'/contents/'+encodeURIComponent(_syncCode)+'.json'}
+function ghRawUrl(){
+  var br=_syncBranch||'main';
+  return 'https://raw.githubusercontent.com/'+_syncRepo+'/'+br+'/'+encodeURIComponent(_syncCode)+'.json';
+}
+function ghApiUrl(){
+  var br=_syncBranch||'main';
+  return 'https://api.github.com/repos/'+_syncRepo+'/contents/'+encodeURIComponent(_syncCode)+'.json?ref='+br;
+}
+
+// 探测仓库默认分支
+function detectBranch(){
+  return fetch('https://api.github.com/repos/'+_syncRepo).then(function(r){if(!r.ok) throw new Error('仓库不存在 HTTP '+r.status);return r.json()})
+    .then(function(d){_syncBranch=d.default_branch||'main'})
+    .catch(function(e){_syncBranch='main'});
+}
 
 window.connectSync=function(){
   var token=document.getElementById('sync-token').value.trim();
@@ -2851,32 +2929,39 @@ window.connectSync=function(){
   
   saveSyncConfig(token,repo,code);
   _syncToken=token;_syncRepo=repo;_syncCode=code;
-  msgEl.textContent='⏳ 连接中...';
+  msgEl.textContent='⏳ 检测仓库中...';
   
-  // 从raw URL拉取
-  fetch(ghRawUrl())
-    .then(function(r){if(!r.ok){if(r.status===404) return null;throw new Error('HTTP '+r.status)}return r.json()})
-    .then(function(remote){
-      if(remote&&remote.data){
-        localStorage.setItem(SK,JSON.stringify(remote.data));
-        DB=remote.data;renderAllGroups();
-        _syncSha=remote._sha||'';
-        msgEl.textContent='✅ 已拉取共享数据';
-      }else{
-        pushNow().then(function(){msgEl.textContent='✅ 已创建共享'});}
-      startPolling();updateSyncUI(true);
-    }).catch(function(e){msgEl.textContent='❌ '+(e.message||'连接失败');});
+  // 先探测分支
+  detectBranch().then(function(){
+    msgEl.textContent='⏳ 拉取数据中 ('+_syncBranch+'分支)...';
+    return fetch(ghRawUrl());
+  }).then(function(r){
+    if(!r.ok){if(r.status===404) return null;throw new Error('读取失败 HTTP '+r.status)}
+    return r.json();
+  }).then(function(remote){
+    if(remote&&remote.data){
+      localStorage.setItem(SK,JSON.stringify(remote.data));
+      DB=remote.data;renderAllGroups();
+      msgEl.textContent='✅ 已拉取共享数据';
+      _lastLocalHash=simpleHash(JSON.stringify(DB));
+    }else{
+      msgEl.textContent='⏳ 云端无数据，上传本地...';
+      return pushNow().then(function(){msgEl.textContent='✅ 本地数据已上传共享'});
+    }
+  }).then(function(){
+    startPolling();updateSyncUI(true);
+  }).catch(function(e){msgEl.textContent='❌ '+(e.message||'连接失败');});
 };
 
 function pushNow(){
   if(!_syncToken||!_syncRepo||!_syncCode) return Promise.resolve();
   var body={data:DB,updated_at:new Date().toISOString()};
   var content=btoa(unescape(encodeURIComponent(JSON.stringify(body))));
-  var payload={message:'sync: '+new Date().toLocaleTimeString(),content:content};
+  var payload={message:'考勤同步 '+new Date().toLocaleString('zh-CN'),content:content};
   if(_syncSha) payload.sha=_syncSha;
-  return fetch(ghApiUrl(),{method:'PUT',headers:{'Authorization':'token '+_syncToken,'Content-Type':'application/json'},body:JSON.stringify(payload)})
-    .then(function(r){if(!r.ok) throw new Error('HTTP '+r.status);return r.json()})
-    .then(function(d){if(d.content&&d.content.sha) _syncSha=d.content.sha;_lastLocalHash=simpleHash(JSON.stringify(DB))});
+  return fetch(ghApiUrl(),{method:'PUT',headers:{'Authorization':'Bearer '+_syncToken,'Accept':'application/vnd.github+json','Content-Type':'application/json'},body:JSON.stringify(payload)})
+    .then(function(r){if(!r.ok) throw new Error('上传失败 HTTP '+r.status+(r.status===401?' (Token无效)':r.status===403?' (无权限/需repo权限)':''));return r.json()})
+    .then(function(d){_syncSha=(d.content&&d.content.sha)||_syncSha;_lastLocalHash=simpleHash(JSON.stringify(DB));});
 }
 
 function startPolling(){
@@ -2906,6 +2991,22 @@ _doSave=function(){
   if(_syncConnected&&_syncToken){clearTimeout(_syncDebounce);_syncDebounce=setTimeout(pushNow,500)}
 };
 
+// 强制上传本地数据到云端（覆盖云端）
+window.forceUploadSync=function(){
+  var msgEl=document.getElementById('sync-msg');
+  if(!_syncToken||!_syncRepo||!_syncCode){msgEl.textContent='⚠ 请先连接同步';return}
+  // 先清掉sha强制创建/覆盖
+  _syncSha='';
+  msgEl.textContent='⏳ 上传本地数据中...';
+  pushNow().then(function(){
+    msgEl.textContent='✅ 本地数据已上传（云端已覆盖）';
+    showToast('⬆ 本地数据已上传云端');
+  }).catch(function(e){
+    msgEl.textContent='❌ '+(e.message||'上传失败');
+    showToast('❌ 上传失败: '+(e.message||''));
+  });
+};
+
 window.disconnectSync=function(){
   if(_syncInterval){clearInterval(_syncInterval);_syncInterval=null}
   _syncConnected=false;_syncToken='';_syncRepo='';_syncCode='';_syncSha='';
@@ -2918,15 +3019,18 @@ function updateSyncUI(connected){
   var dot=document.querySelector('#sync-status .sync-dot'),txt=document.getElementById('sync-status');
   if(dot) dot.className='sync-dot '+(connected?'on':'off');
   if(txt) txt.innerHTML='<span class="sync-dot '+(connected?'on':'off')+'"></span>'+(connected?'同步中':'离线');
-  var bc=document.getElementById('btn-sync-connect'),bd=document.getElementById('btn-sync-disconnect');
-  if(bc) bc.style.display=connected?'none':'';if(bd) bd.style.display=connected?'':'none';
+  var bc=document.getElementById('btn-sync-connect'),bd=document.getElementById('btn-sync-disconnect'),bu=document.getElementById('btn-sync-upload');
+  if(bc) bc.style.display=connected?'none':'';
+  if(bd) bd.style.display=connected?'':'none';
+  if(bu) bu.style.display=connected?'':'none';
 }
 
 (function(){
   try{
     var cfg=JSON.parse(localStorage.getItem('sync_config_gh')||'{}');
     if(cfg.token&&cfg.repo&&cfg.code){
-      _syncToken=cfg.token;_syncRepo=cfg.repo;_syncCode=cfg.code;startPolling();updateSyncUI(true);
+      _syncToken=cfg.token;_syncRepo=cfg.repo;_syncCode=cfg.code;
+      detectBranch().then(function(){startPolling();updateSyncUI(true)});
     }
   }catch(e){}
 })();
