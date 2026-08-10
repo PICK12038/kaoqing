@@ -3028,6 +3028,24 @@ function updateSyncUI(connected){
   if(bu) bu.style.display=connected?'':'none';
 }
 
+// 判断本地是否有真实数据（避免空数据上传覆盖云端）
+function hasRealLocalData(){
+  try{
+    if(!DB||!DB.classes) return false;
+    var count=0;
+    for(var ct in DB.classes){
+      for(var gn in DB.classes[ct]){
+        var t=DB.classes[ct][gn];
+        if(!t) continue;
+        count+=(t.students||[]).filter(function(n){return n&&n.trim()}).length;
+        var d=t.data||{};
+        for(var r in d){if(d[r]&&typeof d[r]==='object'&&Object.keys(d[r]).some(function(k){return k!=='rm'&&d[r][k]})) count+=10;}
+      }
+    }
+    return count>0;
+  }catch(e){return false}
+}
+
 // 页面加载自动同步（无需手动配置）
 (function(){
   try{
@@ -3042,13 +3060,16 @@ function updateSyncUI(connected){
       return resp.json();
     }).then(function(remote){
       if(remote&&remote.data){
+        // 云端有数据 → 拉取覆盖本地（云端优先）
         try{
           localStorage.setItem(SK,JSON.stringify(remote.data));
           DB=remote.data;renderAllGroups();
         }catch(e){}
-      }else{
-        // 云端无数据，上传本地（同步真实数据）
+      }else if(hasRealLocalData()){
+        // 云端无数据且本地有真实数据 → 上传本地
         return pushNow();
+      }else{
+        // 云端无数据且本地也无数据 → 保持本地状态
       }
     }).then(function(){
       startPolling();updateSyncUI(true);
