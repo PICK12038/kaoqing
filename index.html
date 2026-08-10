@@ -412,6 +412,8 @@ td.name input{width:100%;border:none;text-align:center;font-size:14px;font-weigh
     <button class="btn" onclick="openExportModal()">📦 导出</button>
     <button class="btn" onclick="toggleRecycle()" id="btn-recycle">🗑 回收</button>
     <span class="tb-divider"></span>
+    <button class="btn btn-a" id="btn-save-sync" onclick="manualSaveSync()" style="font-weight:600;animation:none">💾 保存同步</button>
+    <span class="tb-divider"></span>
     <button class="btn" onclick="openChangelog()" style="font-size:12px;padding:6px 10px">📋</button>
   </div>
 </div>
@@ -3002,11 +3004,10 @@ window.connectSync=function(){
       DB=merged;renderAllGroups();
       msgEl.textContent='✅ 已合并共享数据（本地+云端）';
       _lastLocalHash=simpleHash(JSON.stringify(DB));
-      _lastLocalSave=0; // 允许立即推送合并结果
-      return pushNow();
+      _pendingChanges=false;
     }else{
-      msgEl.textContent='⏳ 云端无数据，上传本地...';
-      return pushNow().then(function(){msgEl.textContent='✅ 本地数据已上传共享'});
+      msgEl.textContent='✅ 已连接（云端暂无数据，点保存同步上传）';
+      _pendingChanges=true;updateSaveBtn();
     }
   }).then(function(){
     startPolling();updateSyncUI(true);
@@ -3095,11 +3096,42 @@ window.addEventListener('focus',function(){
 });
 
 var _lastLocalSave=0;
+var _pendingChanges=false; // 是否有未保存的本地更改
 var _origDoSave=_doSave;
 _doSave=function(){
   _origDoSave();_lastLocalSave=Date.now();_lastLocalHash=simpleHash(JSON.stringify(DB));
-  if(_syncConnected&&_syncToken){clearTimeout(_syncDebounce);_syncDebounce=setTimeout(pushNow,500)}
+  _pendingChanges=true;updateSaveBtn();
+  // 不再自动推送，改为手动点"保存同步"
 };
+
+// 手动保存并同步到云端（点击"保存同步"按钮）
+window.manualSaveSync=function(){
+  if(!_syncToken||!_syncRepo||!_syncCode){
+    showToast('⚠ 云端同步未连接');
+    return;
+  }
+  var btn=document.getElementById('btn-save-sync');
+  if(btn){btn.textContent='⏳ 同步中...';btn.disabled=true}
+  pushNow().then(function(){
+    _pendingChanges=false;
+    if(btn){btn.textContent='✅ 已保存';btn.disabled=false}
+    setTimeout(function(){
+      if(!_pendingChanges&&btn) btn.textContent='💾 保存同步';
+    },2000);
+    showToast('✅ 数据已保存并同步到云端');
+  }).catch(function(e){
+    if(btn){btn.textContent='💾 保存同步';btn.disabled=false}
+    showToast('❌ 同步失败: '+(e.message||'网络错误'));
+  });
+};
+
+function updateSaveBtn(){
+  var btn=document.getElementById('btn-save-sync');
+  if(!btn) return;
+  if(_pendingChanges&&btn.textContent.indexOf('💾')===-1&&btn.textContent.indexOf('⏳')===-1){
+    btn.textContent='💾 保存同步 ⚠';
+  }
+}
 
 // 强制上传本地数据到云端（覆盖云端）
 window.forceUploadSync=function(){
@@ -3171,12 +3203,8 @@ function hasRealLocalData(){
           localStorage.setItem(SK,JSON.stringify(merged));
           DB=merged;renderAllGroups();
         }catch(e){}
-      }else if(hasRealLocalData()){
-        // 云端无数据且本地有真实数据 → 上传本地
-        return pushNow();
-      }else{
-        // 云端无数据且本地也无数据 → 保持本地状态
       }
+      // 云端无数据时不上传，等用户点"保存同步"后再上传
     }).then(function(){
       startPolling();updateSyncUI(true);
       var st=document.getElementById('sync-status');
