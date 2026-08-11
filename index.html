@@ -3228,7 +3228,9 @@ document.addEventListener('mouseover',function(e){
   // 表头高亮（第二行时段 + 第一行日期）
   var heads=table.querySelectorAll('thead tr');
   if(heads.length>=2){
-    var th2=heads[1].cells[idx];
+    // 注意：thead 第二行因序号/姓名 rowspan=2 不占 cells 索引，cells 从时段开始，
+    // 而 tbody 从 cellIndex=2 开始有考勤格，故需 idx-2 对齐
+    var th2=heads[1].cells[idx-2];
     if(th2){th2.classList.add('hl-col');_hlThs.push(th2)}
     var nPer=safePeriods().length;
     var dayIdx=Math.floor((idx-2)/nPer);
