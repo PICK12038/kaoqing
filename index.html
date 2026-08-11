@@ -232,6 +232,21 @@ td.att .dd-arrow{
 td.att:hover .dd-arrow{opacity:1}
 td.att .dd-arrow:hover{background:rgba(0,0,0,.12);color:#333}
 
+/* ====== 悬停十字定位高亮（行+列） ====== */
+.att-table tr.hl-row td.seq,.att-table tr.hl-row td.name,.att-table tr.hl-row td.weekly{background:#FFEFC2}
+.att-table td.hl-row-c,.att-table td.hl-col{position:relative}
+.att-table td.hl-row-c::after,.att-table td.hl-col::after{
+  content:'';position:absolute;left:0;top:0;right:0;bottom:0;
+  background:rgba(255,180,0,.16);pointer-events:none;z-index:1;
+}
+.att-table td.hl-col::after{background:rgba(255,180,0,.24)}
+.att-table td.hl-cur::after{
+  background:rgba(255,150,0,.38);
+  box-shadow:inset 0 0 0 2px rgba(200,120,0,.5);
+}
+.att-table thead th.hl-col{background:#FFE3A8}
+.att-table thead th.hl-date{background:#FFF3D6}
+
 /* 下拉菜单浮层 */
 .att-menu{
   position:fixed;z-index:9000;background:var(--card);border-radius:var(--radius-sm);
@@ -3164,6 +3179,53 @@ document.addEventListener('click',function(e){
 document.addEventListener('contextmenu',function(e){
   var td=e.target.closest('td.att');if(!td) return;
   e.preventDefault();onAttMenu(e,td);
+});
+
+// ====== 悬停十字定位高亮（行+列） ======
+var _hlCells=[],_hlThs=[],_hlRow=null,_lastHlTd=null;
+function clearCrossHL(){
+  if(_hlRow){_hlRow.classList.remove('hl-row');_hlRow=null}
+  for(var i=0;i<_hlCells.length;i++){_hlCells[i].classList.remove('hl-col','hl-row-c','hl-cur')}
+  _hlCells.length=0;
+  for(var j=0;j<_hlThs.length;j++){_hlThs[j].classList.remove('hl-col','hl-date')}
+  _hlThs.length=0;
+}
+document.addEventListener('mouseover',function(e){
+  var td=e.target.closest('td.att,td.seq,td.name,td.weekly');
+  if(!td){_lastHlTd=null;clearCrossHL();return}
+  if(td===_lastHlTd) return; // 同一格内部移动，不重算
+  _lastHlTd=td;
+  clearCrossHL();
+  var table=td.closest('table.att-table');if(!table) return;
+  var tr=td.closest('tr');if(!tr) return;
+  // 行高亮
+  tr.classList.add('hl-row');_hlRow=tr;
+  Array.prototype.forEach.call(tr.cells,function(c){
+    if(c.classList.contains('att')){c.classList.add('hl-row-c');_hlCells.push(c)}
+  });
+  // 仅考勤格触发列高亮（序号/姓名/汇总列只做行高亮）
+  if(!td.classList.contains('att')) return;
+  var idx=td.cellIndex;
+  // 列高亮：本表 tbody 中所有同列考勤格
+  var tb=table.querySelector('tbody');
+  if(tb){
+    Array.prototype.forEach.call(tb.rows,function(r){
+      var c=r.cells[idx];
+      if(c&&c.classList.contains('att')){c.classList.add('hl-col');_hlCells.push(c)}
+    });
+  }
+  // 当前格加强
+  td.classList.add('hl-cur');
+  // 表头高亮（第二行时段 + 第一行日期）
+  var heads=table.querySelectorAll('thead tr');
+  if(heads.length>=2){
+    var th2=heads[1].cells[idx];
+    if(th2){th2.classList.add('hl-col');_hlThs.push(th2)}
+    var nPer=safePeriods().length;
+    var dayIdx=Math.floor((idx-2)/nPer);
+    var th1=heads[0].cells[2+dayIdx];
+    if(th1){th1.classList.add('hl-date');_hlThs.push(th1)}
+  }
 });
 
 // ====== 学生搜索系统（高容错） ======
