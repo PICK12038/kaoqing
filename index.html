@@ -3033,6 +3033,11 @@ document.addEventListener('mouseover',function(e){
   if(!td){_lastHlTd=null;clearCrossHL();return}
   if(td===_lastHlTd) return; // 同一格内部移动，不重算
   _lastHlTd=td;
+  // 拖动划选期间或已有选中格时，禁用十字高亮（避免橙色遮盖蓝色选中/状态色）
+  if(_dragStart||Object.keys(selectedCells).length>0){
+    clearCrossHL();
+    return;
+  }
   clearCrossHL();
   var table=td.closest('table.att-table');if(!table) return;
   var tr=td.closest('tr');if(!tr) return;
@@ -3052,8 +3057,12 @@ document.addEventListener('mouseover',function(e){
       if(c&&c.classList.contains('att')){c.classList.add('hl-col');_hlCells.push(c)}
     });
   }
-  // 当前格加强
-  td.classList.add('hl-cur');
+  // 当前格加强：若已有考勤状态则不显示橙色 hl-cur（避免遮挡状态色），只参与行/列背景
+  if(td.getAttribute('data-status')){
+    _hlCells.push(td); // 记录以便清除，但不显示 hl-cur
+  }else{
+    td.classList.add('hl-cur');
+  }
   // 表头高亮（第二行时段 + 第一行日期）
   var heads=table.querySelectorAll('thead tr');
   if(heads.length>=2){
