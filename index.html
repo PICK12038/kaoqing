@@ -156,14 +156,6 @@ td.att .val.anim-pop{animation:bounceIn .2s ease}
 .week-nav .wn-today{font-size:11px;padding:3px 10px;cursor:pointer;border:1px solid var(--accent);border-radius:12px;color:var(--accent);background:var(--card);font-family:var(--ff);transition:var(--transition)}
 .week-nav .wn-today:hover{background:var(--accent2)}
 
-/* ===== 云同步 ===== */
-.sync-dot{width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:4px;vertical-align:middle}
-.sync-dot.off{background:#ccc}
-.sync-dot.on{background:#4CAF50;animation:pulse-sync 2s infinite}
-.sync-dot.err{background:#F44336}
-@keyframes pulse-sync{0%,100%{opacity:1}50%{opacity:.5}}
-#sync-status{cursor:pointer;font-size:12px;color:var(--text2);white-space:nowrap;padding:4px 8px;border-radius:12px;border:1px solid transparent;transition:var(--transition)}
-#sync-status:hover{border-color:var(--accent);background:var(--accent2)}
 .tab-group{display:flex;gap:5px}
 .tab-group button{
   padding:7px 18px;border-radius:var(--radius-sm);border:1px solid var(--border);
@@ -424,7 +416,6 @@ td.name input{width:100%;border:none;text-align:center;font-size:14px;font-weigh
     <span class="sub" id="global-stats">4班×4组</span>
   </div>
   <button class="btn btn-a" onclick="openImport()">📥 导入</button>
-  <span id="sync-status" onclick="toggleSyncModal()"><span class="sync-dot off"></span>离线</span>
   <div class="tb-search" id="search-wrap">
     <input id="search-input" placeholder="🔍 搜索学生（姓名/拼音首字母/任意关键字）…" autocomplete="off" oninput="onSearchInput()" onkeydown="onSearchKeydown(event)" onfocus="onSearchInput()">
     <button class="s-clear" id="s-clear" onclick="clearSearch()">✕</button>
@@ -435,9 +426,6 @@ td.name input{width:100%;border:none;text-align:center;font-size:14px;font-weigh
     <span class="tb-divider"></span>
     <button class="btn" onclick="openExportModal()">📦 导出</button>
     <button class="btn" onclick="toggleRecycle()" id="btn-recycle">🗑 回收</button>
-    <span class="tb-divider"></span>
-    <button class="btn btn-a" id="btn-save-sync" onclick="manualSaveSync()" style="font-weight:600;animation:none">💾 保存同步</button>
-    <span class="tb-divider"></span>
     <button class="btn" onclick="openChangelog()" style="font-size:12px;padding:6px 10px">📋</button>
   </div>
 </div>
@@ -689,37 +677,7 @@ td.name input{width:100%;border:none;text-align:center;font-size:14px;font-weigh
   </div>
 </div>
 
-<!-- ====== 云同步配置弹窗 ====== -->
-<div class="modal-overlay" id="modal-sync">
-  <div class="modal-card" style="width:500px">
-    <h2>☁️ 云同步设置</h2>
-    <div style="font-size:13px;color:var(--text2);margin-bottom:14px;line-height:1.6">
-      使用 <b>GitHub</b> 实现多设备数据共享。
-      同一共享码的设备，修改后点击「保存同步」，其他设备自动收到更新。
-    </div>
-    <div style="display:flex;flex-direction:column;gap:10px">
-      <label style="font-size:12px;color:var(--text2)">GitHub Token（需要 repo 权限）
-        <input id="sync-token" type="password" placeholder="ghp_xxxxxxxx" style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;font-family:var(--ff);margin-top:3px">
-      </label>
-      <label style="font-size:12px;color:var(--text2)">仓库（如 PICK12038/kaoqing）
-        <input id="sync-repo" placeholder="用户名/仓库名" style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;font-family:var(--ff);margin-top:3px">
-      </label>
-      <label style="font-size:12px;color:var(--text2)">共享码（同一画室用相同码）
-        <input id="sync-code" placeholder="如：hz-art-2026" style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;font-family:var(--ff);margin-top:3px">
-      </label>
-    </div>
-    <div style="margin-top:12px;font-size:11px;color:var(--text3);line-height:1.6">
-      📌 生成Token：<a href="https://github.com/settings/tokens/new?scopes=repo&description=attendance-sync" target="_blank" style="color:var(--accent)">点此创建</a>（勾选repo→有效期选No expiration→生成）<br>
-      📌 仓库：使用已有 <b>PICK12038/kaoqing</b> 即可
-    </div>
-    <div class="modal-actions" style="margin-top:14px">
-      <span id="sync-msg" style="font-size:12px;color:var(--text2);flex:1"></span>
-      <button class="btn" onclick="closeModal('modal-sync')">取消</button>
-      <button class="btn btn-a" id="btn-sync-connect" onclick="connectSync()">🔗 连接</button>
-      <button class="btn btn-r" id="btn-sync-disconnect" onclick="disconnectSync()" style="display:none">断开</button>
-    </div>
-  </div>
-</div>
+<!-- ====== 云同步配置弹窗（已删除） ====== -->
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 
@@ -2905,258 +2863,6 @@ function showToast(msg){
   el._timer=setTimeout(function(){el.classList.remove('show')},2000);
 }
 
-// ====== 云同步系统（GitHub 实时同步）======
-// 内置默认同步配置（Token拆两段，运行时拼接）
-var _DEFAULT_SYNC={token:'ghp_rHurmyzgnW5b'+'VRB7p10Hyrz9a5kvnl2Dw4ym',repo:'PICK12038/kaoqing',code:'hz-art-2026'};
-var _syncToken='',_syncRepo='',_syncCode='',_syncConnected=false,_syncSha='',_syncBranch='main',_syncDebounce=null,_syncInterval=null,_lastLocalHash='',_rateLimitedUntil=0,_pendingChanges=false,_lastLocalSave=0;
-
-window.toggleSyncModal=function(){
-  var d=document.getElementById('modal-sync');d.classList.toggle('show');loadSyncConfig();
-};
-
-function loadSyncConfig(){
-  try{
-    var cfg=JSON.parse(localStorage.getItem('sync_config_gh')||'{}');
-    var t=document.getElementById('sync-token'),r=document.getElementById('sync-repo'),c=document.getElementById('sync-code');
-    if(t) t.value=cfg.token||_DEFAULT_SYNC.token;
-    if(r) r.value=cfg.repo||_DEFAULT_SYNC.repo;
-    if(c) c.value=cfg.code||_DEFAULT_SYNC.code;
-  }catch(e){}
-}
-
-function saveSyncConfig(token,repo,code){
-  localStorage.setItem('sync_config_gh',JSON.stringify({token:token,repo:repo,code:code}));
-}
-
-function simpleHash(s){var h=0;for(var i=0;i<s.length;i++){h=((h<<5)-h)+s.charCodeAt(i);h|=0}return h}
-
-function ghApiUrl(){
-  var br=_syncBranch||'main';
-  return 'https://api.github.com/repos/'+_syncRepo+'/contents/'+encodeURIComponent(_syncCode)+'.json?ref='+br;
-}
-
-// 用GitHub API读取数据（即时无CDN缓存）
-function ghRead(){
-  if(_rateLimitedUntil&&Date.now()<_rateLimitedUntil) return Promise.resolve(null);
-  return fetch(ghApiUrl(),{headers:{'Authorization':'Bearer '+_syncToken,'Accept':'application/vnd.github+json'}})
-    .then(function(r){
-      if(r.status===404) return null;
-      if(r.status===403){_rateLimitedUntil=Date.now()+60000;console.warn('GitHub API限流，暂停同步60秒');return null}
-      if(!r.ok) throw new Error('读取失败 HTTP '+r.status);
-      return r.json();
-    })
-    .then(function(meta){
-      if(!meta||!meta.content) return null;
-      _syncSha=meta.sha;
-      try{
-        var decoded=JSON.parse(decodeURIComponent(escape(atob(meta.content.replace(/\n/g,'')))));
-        return decoded&&decoded.data?decoded.data:null;
-      }catch(e){return null}
-    });
-}
-
-function detectBranch(){
-  return fetch('https://api.github.com/repos/'+_syncRepo).then(function(r){if(!r.ok) throw new Error('仓库不存在 HTTP '+r.status);return r.json()})
-    .then(function(d){_syncBranch=d.default_branch||'main'})
-    .catch(function(e){_syncBranch='main'});
-}
-
-// 合并式：云端数据合并到本地（两端修改都保留）
-function mergeData(localDB,remoteDB){
-  if(!remoteDB) return localDB;
-  if(!localDB) return remoteDB;
-  var out=JSON.parse(JSON.stringify(localDB));
-  if(!out.classes) out.classes={};
-  var rc=remoteDB.classes||{};
-  for(var ct in rc){
-    if(!out.classes[ct]) out.classes[ct]={};
-    for(var gn in rc[ct]){
-      if(!out.classes[ct][gn]) out.classes[ct][gn]={};
-      var lt=out.classes[ct][gn],rt=rc[ct][gn];
-      if(!lt.dates&&rt.dates) lt.dates=JSON.parse(JSON.stringify(rt.dates));
-      if(!lt.students||lt.students.length===0) lt.students=JSON.parse(JSON.stringify(rt.students||[]));
-      else if(rt.students&&rt.students.length>lt.students.length){
-        for(var i=lt.students.length;i<rt.students.length;i++) lt.students.push(rt.students[i]);
-      }
-      if(!lt.data) lt.data={};
-      var rd=rt.data||{};
-      for(var r in rd){
-        if(!lt.data[r]) lt.data[r]={};
-        for(var k in rd[r]){
-          if(!lt.data[r][k]&&rd[r][k]) lt.data[r][k]=rd[r][k];
-        }
-      }
-      if(!lt.maxRows&&rt.maxRows) lt.maxRows=rt.maxRows;
-    }
-  }
-  return out;
-}
-
-window.connectSync=function(){
-  var token=document.getElementById('sync-token').value.trim();
-  var repo=document.getElementById('sync-repo').value.trim();
-  var code=document.getElementById('sync-code').value.trim().toLowerCase().replace(/[^a-z0-9_-]/g,'');
-  var msgEl=document.getElementById('sync-msg');
-  if(!token||!repo||!code){msgEl.textContent='⚠ 请填写所有字段';return}
-  if(repo.split('/').length!==2){msgEl.textContent='⚠ 仓库格式: 用户名/仓库名';return}
-  
-  saveSyncConfig(token,repo,code);
-  _syncToken=token;_syncRepo=repo;_syncCode=code;
-  msgEl.textContent='⏳ 检测仓库中...';
-  
-  detectBranch().then(function(){
-    msgEl.textContent='⏳ 拉取数据中 ('+_syncBranch+'分支)...';
-    return ghRead();
-  }).then(function(remote){
-    if(remote){
-      var localCopy=JSON.parse(JSON.stringify(DB));
-      var merged=mergeData(localCopy,remote);
-      localStorage.setItem(SK,JSON.stringify(merged));
-      DB=merged;renderAllGroups();
-      msgEl.textContent='✅ 已合并共享数据（本地+云端）';
-      _lastLocalHash=simpleHash(JSON.stringify(DB));
-      _pendingChanges=false;
-    }else{
-      msgEl.textContent='✅ 已连接（云端暂无数据，填完点保存同步）';
-      _pendingChanges=true;updateSaveBtn();
-    }
-  }).then(function(){
-    startPolling();updateSyncUI(true);
-  }).catch(function(e){msgEl.textContent='❌ '+(e.message||'连接失败');});
-};
-
-// 保存到云端（点"保存同步"按钮）——先拉取合并再上传
-window.manualSaveSync=function(){
-  if(!_syncToken||!_syncRepo||!_syncCode){showToast('⚠ 请先点「离线」配置并连接');return}
-  var btn=document.getElementById('btn-save-sync');
-  if(btn){btn.textContent='⏳ 同步中...';btn.disabled=true}
-  pushNow().then(function(){
-    _pendingChanges=false;
-    if(btn){btn.textContent='✅ 已保存';btn.disabled=false}
-    setTimeout(function(){if(!_pendingChanges&&btn) btn.textContent='💾 保存同步'},2000);
-    showToast('✅ 数据已保存并同步到云端');
-  }).catch(function(e){
-    if(btn){btn.textContent='💾 保存同步';btn.disabled=false}
-    showToast('❌ 同步失败: '+(e.message||'网络错误'));
-  });
-};
-
-function pushNow(retry){
-  if(!_syncToken||!_syncRepo||!_syncCode) return Promise.resolve();
-  return fetch(ghApiUrl(),{headers:{'Authorization':'Bearer '+_syncToken,'Accept':'application/vnd.github+json'}})
-    .then(function(r){return r.json()})
-    .then(function(meta){
-      if(meta&&meta.sha) _syncSha=meta.sha;
-      if(meta&&meta.content){
-        try{
-          var decoded=JSON.parse(decodeURIComponent(escape(atob(meta.content))));
-          if(decoded&&decoded.data){
-            var localCopy=JSON.parse(JSON.stringify(DB));
-            DB=mergeData(localCopy,decoded.data);
-          }
-        }catch(e){}
-      }
-      var body={data:DB,updated_at:new Date().toISOString()};
-      var content=btoa(unescape(encodeURIComponent(JSON.stringify(body))));
-      var payload={message:'考勤同步 '+new Date().toLocaleString('zh-CN'),content:content};
-      if(_syncSha) payload.sha=_syncSha;
-      return fetch(ghApiUrl(),{method:'PUT',headers:{'Authorization':'Bearer '+_syncToken,'Accept':'application/vnd.github+json','Content-Type':'application/json'},body:JSON.stringify(payload)})
-        .then(function(r){
-          if(!r.ok&&r.status===409&&!retry) return pushNow(true);
-          if(!r.ok) throw new Error('上传失败 HTTP '+r.status+(r.status===401?' (Token无效，请重新生成并填到配置)':r.status===403?' (无权限)':''));
-          return r.json();
-        })
-        .then(function(d){
-          _syncSha=(d.content&&d.content.sha)||_syncSha;
-          _lastLocalHash=simpleHash(JSON.stringify(DB));
-          localStorage.setItem(SK,JSON.stringify(DB));
-          renderAllGroups();
-        });
-    });
-}
-
-function startPolling(){
-  if(_syncInterval) clearInterval(_syncInterval);
-  _syncConnected=true;
-  _syncInterval=setInterval(pollOnce,3000);
-}
-
-function pollOnce(){
-  if(!_syncConnected) return;
-  ghRead()
-    .then(function(remote){
-      if(!remote) return;
-      var h=simpleHash(JSON.stringify(remote));
-      if(h!==_lastLocalHash&&Date.now()-_lastLocalSave>1500){
-        var before=JSON.stringify(DB);
-        var localCopy=JSON.parse(JSON.stringify(DB));
-        var merged=mergeData(localCopy,remote);
-        var after=JSON.stringify(merged);
-        localStorage.setItem(SK,JSON.stringify(merged));
-        DB=merged;renderAllGroups();
-        _lastLocalHash=simpleHash(JSON.stringify(DB));
-        if(after!==before) showToast('🔄 收到共享更新');
-      }
-    }).catch(function(){});
-}
-
-// 页面重新获得焦点时立即同步
-document.addEventListener('visibilitychange',function(){if(!document.hidden&&_syncConnected) pollOnce()});
-window.addEventListener('focus',function(){if(_syncConnected) pollOnce()});
-
-var _origDoSave=_doSave;
-_doSave=function(){
-  _origDoSave();_lastLocalSave=Date.now();_lastLocalHash=simpleHash(JSON.stringify(DB));
-  _pendingChanges=true;updateSaveBtn();
-  // 不自动推送，用户点"保存同步"才上传
-};
-
-function updateSaveBtn(){
-  var btn=document.getElementById('btn-save-sync');
-  if(!btn) return;
-  if(_pendingChanges&&btn.textContent.indexOf('💾')===-1&&btn.textContent.indexOf('⏳')===-1){
-    btn.textContent='💾 保存同步 ⚠';
-  }
-}
-
-window.disconnectSync=function(){
-  if(_syncInterval){clearInterval(_syncInterval);_syncInterval=null}
-  _syncConnected=false;_syncToken='';_syncRepo='';_syncCode='';_syncSha='';
-  updateSyncUI(false);
-  document.getElementById('sync-msg').textContent='已断开';
-  closeModal('modal-sync');
-};
-
-function updateSyncUI(connected){
-  var dot=document.querySelector('#sync-status .sync-dot'),txt=document.getElementById('sync-status');
-  if(dot) dot.className='sync-dot '+(connected?'on':'off');
-  if(txt) txt.innerHTML='<span class="sync-dot '+(connected?'on':'off')+'"></span>'+(connected?'同步中':'离线');
-  var bc=document.getElementById('btn-sync-connect'),bd=document.getElementById('btn-sync-disconnect');
-  if(bc) bc.style.display=connected?'none':'';
-  if(bd) bd.style.display=connected?'':'none';
-}
-
-// 页面加载自动重连（有已保存配置时）
-(function(){
-  try{
-    var cfg=JSON.parse(localStorage.getItem('sync_config_gh')||'{}');
-    var t=cfg.token||_DEFAULT_SYNC.token, r=cfg.repo||_DEFAULT_SYNC.repo, c=cfg.code||_DEFAULT_SYNC.code;
-    if(!t||!r||!c) return;
-    _syncToken=t;_syncRepo=r;_syncCode=c;
-    detectBranch().then(function(){return ghRead()}).then(function(remote){
-      if(remote){
-        try{
-          var localCopy=JSON.parse(JSON.stringify(DB));
-          var merged=mergeData(localCopy,remote);
-          localStorage.setItem(SK,JSON.stringify(merged));
-          DB=merged;renderAllGroups();
-        }catch(e){}
-      }
-    }).then(function(){
-      startPolling();updateSyncUI(true);
-    }).catch(function(){});
-  }catch(e){}
-})();
 
 // ====== 快捷键 ======
 document.addEventListener('keydown',function(e){
