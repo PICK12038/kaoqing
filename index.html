@@ -82,6 +82,17 @@ td.att .val.anim-pop{animation:bounceIn .2s ease}
 .tb-search .search-result .sr-loc{font-size:12px;color:var(--text2);white-space:nowrap}
 .tb-search .search-result .sr-empty{padding:16px;text-align:center;color:var(--text2);font-size:13px}
 .tb-search .search-result .sr-count{padding:6px 14px;font-size:11px;color:var(--text2);border-bottom:1px solid var(--border);background:#fafbfd}
+/* 搜索历史 */
+.tb-search .search-result .sr-hist-head{display:flex;align-items:center;justify-content:space-between;padding:6px 14px;font-size:11px;color:var(--text2);border-bottom:1px solid var(--border);background:#fafbfd}
+.tb-search .search-result .sr-hist-clear{background:none;border:none;color:var(--accent);font-size:11px;cursor:pointer;font-family:var(--ff);padding:0}
+.tb-search .search-result .sr-hist-clear:hover{text-decoration:underline}
+.tb-search .search-result .sr-hist-item{display:flex;align-items:center;gap:8px;padding:7px 14px;cursor:pointer;border-bottom:1px solid var(--border);font-size:13px;transition:var(--transition)}
+.tb-search .search-result .sr-hist-item:last-child{border-bottom:none}
+.tb-search .search-result .sr-hist-item:hover{background:var(--accent2)}
+.tb-search .search-result .sr-hist-q{flex:1;color:var(--text);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tb-search .search-result .sr-hist-t{font-size:11px;color:var(--text3)}
+.tb-search .search-result .sr-hist-del{background:none;border:none;color:var(--text3);font-size:12px;cursor:pointer;padding:0 2px;font-family:var(--ff)}
+.tb-search .search-result .sr-hist-del:hover{color:var(--danger)}
 .btn{
   display:inline-flex;align-items:center;gap:5px;
   padding:8px 16px;border-radius:var(--radius-sm);border:1px solid var(--border);
@@ -422,7 +433,7 @@ td.name input{width:100%;border:none;text-align:center;font-size:14px;font-weigh
     <div class="search-result" id="search-result"></div>
   </div>
   <div class="tb-actions">
-    <button class="btn btn-o" onclick="toggleBatchMode()" id="btn-batch">☑ 批量</button>
+    <button class="btn btn-o" onclick="toggleBatchMode()" id="btn-batch" title="按住 Ctrl 点击多个考勤格，再点状态按钮批量填入">☑ 多选</button>
     <span class="tb-divider"></span>
     <button class="btn" onclick="openExportModal()">📦 导出</button>
     <button class="btn" onclick="toggleRecycle()" id="btn-recycle">🗑 回收</button>
@@ -452,9 +463,9 @@ td.name input{width:100%;border:none;text-align:center;font-size:14px;font-weigh
     <button class="wn-today" id="wn-today">📍 本周</button>
   </div>
 
-  <!-- 批量操作栏 -->
+  <!-- 多选批量操作栏 -->
   <div class="batch-bar" id="batch-bar">
-    <span id="batch-count">点击格子选择，已选 0 格</span>
+    <span id="batch-count">按住 Ctrl 点击多选，已选 0 格</span>
     <button class="btn btn-sm" onclick="batchSelectAll()">全选整组</button>
     <button class="btn btn-sm" onclick="batchSelectRow()">整行</button>
     <button class="btn btn-sm" onclick="batchSelectCol()">整列</button>
@@ -470,7 +481,6 @@ td.name input{width:100%;border:none;text-align:center;font-size:14px;font-weigh
     <button class="btn btn-sm btn-r" onclick="batchDeleteStudents()">删除姓名</button>
     <span class="tb-divider" style="margin:0 2px"></span>
     <button class="btn btn-sm" onclick="batchClearSel()">取消选择</button>
-    <button class="btn btn-sm" onclick="toggleBatchMode()">退出批量</button>
   </div>
 
   <!-- 4组表格容器 -->
@@ -1322,6 +1332,7 @@ function toggleBatchCell(td){
   if(selectedCells[key]){delete selectedCells[key];td.classList.remove('selected')}
   else{selectedCells[key]=true;td.classList.add('selected')}
   updateBatchCount();
+  updateBatchBar();
 };
 
 window.onSeqChange=function(inp){
@@ -1697,18 +1708,20 @@ window.batchApplyQuick=function(st){
   selectedCells={};
   var label=st==='CLEAR'?'清空':st;
   saveDBForce();renderAllGroups();
-  document.getElementById('batch-count').textContent='已选 0 格';
+  updateBatchBar();
+  document.getElementById('batch-count').textContent='按住 Ctrl 点击多选，已选 0 格';
   addLog('批量操作','批量设置 '+keys.length+' 项为 '+label);
   showToast('✅ 已批量设置 '+keys.length+' 项为 '+label);
 };
 
 window.batchSelectRow=function(){
-  if(!batchMode) return;
   var rows=document.querySelectorAll(gSel()+' .att-table tbody tr');
   rows.forEach(function(tr){
     var tds=tr.querySelectorAll('td.att');
-    tds.forEach(function(td){td.click()});
+    tds.forEach(function(td){selectCell(td)});
   });
+  updateBatchCount();
+  updateBatchBar();
 };
 
 // ====== 批量模式辅助 ======
@@ -1720,33 +1733,45 @@ var selectedCells={};
 
 window.toggleBatchMode=function(){
   batchMode=!batchMode;
-  document.getElementById('batch-bar').classList.toggle('show',batchMode);
-  document.getElementById('btn-batch').textContent=batchMode?'☑ 退出批量':'☑ 批量模式';
+  document.getElementById('batch-bar').classList.toggle('show',batchMode||Object.keys(selectedCells).length>0);
+  document.getElementById('btn-batch').textContent=batchMode?'☑ 退出多选':'☑ 多选';
   if(!batchMode){selectedCells={}}
-  else{document.getElementById('batch-count').textContent='已选 0 格'}
+  else{document.getElementById('batch-count').textContent='按住 Ctrl 点击多选，已选 0 格'}
   renderAllGroups();
 };
 
 window.batchClearSel=function(){
   selectedCells={};renderAllGroups();
-  document.getElementById('batch-count').textContent='点击格子选择，已选 0 格';
+  document.getElementById('batch-count').textContent='按住 Ctrl 点击多选，已选 0 格';
+  updateBatchBar();
 };
+
+// 根据是否有选中格自动显示/隐藏批量操作栏
+function updateBatchBar(){
+  var bar=document.getElementById('batch-bar');
+  if(!bar) return;
+  var n=Object.keys(selectedCells).length;
+  bar.classList.toggle('show',n>0);
+  if(n>0) document.getElementById('batch-count').textContent='已选 '+n+' 格（可点状态按钮批量填入）';
+}
+
+// 添加选择（不取消，用于全选/整行/整列）
+function selectCell(td){
+  var r=td.getAttribute('data-r'),k=td.getAttribute('data-k'),gn=td.getAttribute('data-g'),cn=td.getAttribute('data-c')||currentClass;
+  var key=cn+'_'+gn+'_'+r+'_'+k;
+  if(!selectedCells[key]){selectedCells[key]=true;td.classList.add('selected')}
+}
 
 // 全选当前组所有考勤格
 window.batchSelectAll=function(){
-  if(!batchMode) return;
   var tds=document.querySelectorAll(gSel()+' td.att');
-  tds.forEach(function(td){
-    var r=td.getAttribute('data-r'),k=td.getAttribute('data-k'),gn=td.getAttribute('data-g');
-    var key=gn+'_'+r+'_'+k;
-    selectedCells[key]=true;td.classList.add('selected');
-  });
+  tds.forEach(function(td){selectCell(td)});
   updateBatchCount();
+  updateBatchBar();
 };
 
 // 整列选择：弹出选择某一天
 window.batchSelectCol=function(){
-  if(!batchMode) return;
   var ps=safePeriods(),dates=safeDates(getCurrentTable());
   if(!dates.length) return;
   // 弹出简易选择：让用户选第几天
@@ -1761,26 +1786,18 @@ window.batchSelectCol=function(){
     var k=td.getAttribute('data-k');
     // k格式为 "d_p"，如"0_0"
     var parts=k.split('_'),kd=parseInt(parts[0],10);
-    if(kd===dIdx){
-      var r=td.getAttribute('data-r'),gn=td.getAttribute('data-g');
-      var key=gn+'_'+r+'_'+k;
-      selectedCells[key]=true;td.classList.add('selected');
-    }
+    if(kd===dIdx) selectCell(td);
   });
   updateBatchCount();
+  updateBatchBar();
 };
 
 // 反选
 window.batchInvert=function(){
-  if(!batchMode) return;
   var tds=document.querySelectorAll(gSel()+' td.att');
   tds.forEach(function(td){
-    var r=td.getAttribute('data-r'),k=td.getAttribute('data-k'),gn=td.getAttribute('data-g');
-    var key=gn+'_'+r+'_'+k;
-    if(selectedCells[key]){delete selectedCells[key];td.classList.remove('selected')}
-    else{selectedCells[key]=true;td.classList.add('selected')}
+    toggleBatchCell(td);
   });
-  updateBatchCount();
 };
 
 function updateBatchCount(){
@@ -1829,6 +1846,7 @@ window.batchDeleteStudents=function(){
   }
   
   selectedCells={};saveDBForce();renderAllGroups();
+  updateBatchBar();
   addLog('删除学生','删除 '+currentClass+' '+currentGroup+' '+studentsToDel.length+'人');
   showToast('🗑 已删除 '+studentsToDel.length+' 名学生（移至回收站）');
 };
@@ -2912,7 +2930,14 @@ if(wnToday) wnToday.addEventListener('click',function(){goWeekToday()});
 document.addEventListener('click',function(e){
   var td=e.target.closest('td.att');if(!td) return;
   if(e.target.closest('.dd-arrow')) return; // 箭头由onAttMenu处理
-  if(batchMode){toggleBatchCell(td);return}
+  // 按住 Ctrl/Cmd 点击 = 多选/取消选中（批量模式）
+  if(e.ctrlKey||e.metaKey||batchMode){
+    e.preventDefault();
+    toggleBatchCell(td);
+    return;
+  }
+  // 普通点击：若已有选中格则清除选择，再进行单格切换
+  if(Object.keys(selectedCells).length>0) batchClearSel();
   var r=td.getAttribute('data-r'),k=td.getAttribute('data-k'),gn=td.getAttribute('data-g'),cn=td.getAttribute('data-c')||currentClass;
   var t=getTableByGroup(gn,cn);if(!t) return;
   var cur=td.getAttribute('data-status')||'';
@@ -3088,9 +3113,73 @@ window.onSearchInput=function(){
   var clearBtn=document.getElementById('s-clear');
   clearBtn.classList.toggle('show',query.length>0);
 
+  if(!query){showSearchHistory();return}
+
   _searchTimer=setTimeout(function(){
     doSearch(query);
   },100);
+};
+
+// ====== 搜索历史 ======
+var SEARCH_HIST_KEY='att_search_hist_v1';
+var SEARCH_HIST_MAX=10;
+
+function getSearchHistory(){
+  try{var h=JSON.parse(localStorage.getItem(SEARCH_HIST_KEY));return Array.isArray(h)?h:[]}catch(e){return []}
+}
+function saveSearchHistory(h){
+  try{localStorage.setItem(SEARCH_HIST_KEY,JSON.stringify(h.slice(0,SEARCH_HIST_MAX)))}catch(e){}
+}
+function addSearchHistory(query){
+  if(!query) return;
+  var h=getSearchHistory();
+  // 去重：移除已存在的同词
+  h=h.filter(function(s){return s.q!==query});
+  h.unshift({q:query,t:new Date().toISOString()});
+  saveSearchHistory(h);
+}
+function delSearchHistory(query){
+  saveSearchHistory(getSearchHistory().filter(function(s){return s.q!==query}));
+  showSearchHistory();
+}
+
+// 显示搜索历史（输入为空时）
+function showSearchHistory(){
+  var resultEl=document.getElementById('search-result');
+  var h=getSearchHistory();
+  var html='';
+  if(h.length===0){
+    html='<div class="sr-empty">暂无搜索历史</div>';
+  }else{
+    html+='<div class="sr-hist-head"><span>🕘 最近搜索</span><button class="sr-hist-clear" onclick="clearSearchHistory()">清空历史</button></div>';
+    for(var i=0;i<h.length;i++){
+      var item=h[i],time='';
+      try{var d=new Date(item.t);time=d.getMonth()+1+'/'+d.getDate()+' '+pad2(d.getHours())+':'+pad2(d.getMinutes())}catch(e){}
+      html+='<div class="sr-hist-item" data-q="'+escH(item.q)+'" onclick="useSearchHistory(this.getAttribute(\'data-q\'))">'+
+        '<span class="sr-hist-q">🔍 '+escH(item.q)+'</span>'+
+        '<span class="sr-hist-t">'+time+'</span>'+
+        '<button class="sr-hist-del" onclick="event.stopPropagation();delSearchHistory(this.parentNode.getAttribute(\'data-q\'))" title="删除">✕</button>'+
+        '</div>';
+    }
+  }
+  resultEl.innerHTML=html;
+  resultEl.classList.add('show');
+}
+function pad2(n){return n<10?'0'+n:''+n}
+
+window.useSearchHistory=function(q){
+  var input=document.getElementById('search-input');
+  input.value=q;
+  document.getElementById('s-clear').classList.add('show');
+  doSearch(q);
+  input.focus();
+  // 光标移到末尾
+  try{input.setSelectionRange(q.length,q.length)}catch(e){}
+};
+
+window.clearSearchHistory=function(){
+  saveSearchHistory([]);
+  showSearchHistory();
 };
 
 function doSearch(query){
@@ -3138,6 +3227,7 @@ function doSearch(query){
   if(allResults.length===0){
     html='<div class="sr-empty">未找到匹配「'+escH(query)+'」的学生</div>';
   }else{
+    addSearchHistory(query); // 有结果时记录搜索历史
     var maxShow=Math.min(allResults.length,20);
     html='<div class="sr-count">找到 '+allResults.length+' 名学生，显示前 '+maxShow+' 条</div>';
     for(var i=0;i<maxShow;i++){
@@ -3250,6 +3340,15 @@ document.addEventListener('click',function(e){
   if(wrap&&!wrap.contains(e.target)){
     document.getElementById('search-result').classList.remove('show');
   }
+});
+
+// 点击空白处（非考勤格、非批量栏、非批量按钮）清除多选
+document.addEventListener('click',function(e){
+  if(e.target.closest('td.att')) return;
+  if(e.target.closest('#batch-bar')) return;
+  if(e.target.closest('#btn-batch')) return;
+  if(e.target.closest('#btn-recycle')) return;
+  if(Object.keys(selectedCells).length>0) batchClearSel();
 });
 
 })();
