@@ -2932,7 +2932,7 @@ document.addEventListener('contextmenu',function(e){
 });
 
 // ====== 鼠标拖动划选（Excel式：按住左键拖动选择多个格子） ======
-var _dragStart=null,_dragPreview=[],_dragJustEnded=false;
+var _dragStart=null,_dragPreview=[],_dragJustEnded=false,_longPressTimer=null,_longPressActivated=false;
 
 function clearDragPreview(){
   for(var i=0;i<_dragPreview.length;i++){if(_dragPreview[i]) _dragPreview[i].classList.remove('sel-preview')}
@@ -2987,6 +2987,18 @@ document.addEventListener('mousedown',function(e){
   var td=e.target.closest('td.att');if(!td) return;
   if(e.target.closest('.dd-arrow')) return;
   _dragStart={td:td,r:parseInt(td.getAttribute('data-r'),10)};
+  _longPressActivated=false;
+  clearTimeout(_longPressTimer);
+  // 长按(350ms不松开)自动选中当前格，支持"长按选中→拖动扩展"
+  _longPressTimer=setTimeout(function(){
+    if(!_dragStart) return;
+    _longPressActivated=true;
+    var c=_dragStart.td;
+    if(!c.classList.contains('selected')){
+      toggleBatchCell(c);
+      showToast('已选中，可拖动扩展选区，或点状态按钮填入');
+    }
+  },350);
 });
 
 document.addEventListener('mousemove',function(e){
@@ -3001,6 +3013,7 @@ document.addEventListener('mousemove',function(e){
 });
 
 document.addEventListener('mouseup',function(e){
+  clearTimeout(_longPressTimer);
   if(!_dragStart) return;
   var endTd=e.target.closest('td.att');
   if(endTd&&_dragStart.td!==endTd){
@@ -3014,6 +3027,10 @@ document.addEventListener('mouseup',function(e){
     // 自动清除标志，避免残留导致下一次普通点击被吞
     setTimeout(function(){_dragJustEnded=false},50);
     if(cells.length>0) showToast('已选 '+Object.keys(selectedCells).length+' 格，点状态按钮批量填入');
+  }else if(_longPressActivated&&endTd){
+    // 长按已选中起点，松开（未拖动/同格）时保留选中状态，抑制后续click切换
+    _dragJustEnded=true;
+    setTimeout(function(){_dragJustEnded=false},50);
   }
   clearDragPreview();
   _dragStart=null;
