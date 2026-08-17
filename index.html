@@ -312,9 +312,9 @@ td.weekly .has-issue{font-size:13px;line-height:1.3}
 .date-picker .dp-actions button.clear-btn{color:var(--text2)}
 .date-picker .dp-actions button.custom-btn{color:var(--accent);font-weight:600}
 
-/* 拖动划选预览 */
-td.att.selected{outline:2px solid var(--accent)!important;outline-offset:-2px;z-index:1;box-shadow:0 0 0 3px rgba(74,108,247,.15)}
-td.att.sel-preview{outline:2px dashed var(--accent)!important;outline-offset:-2px;background:rgba(74,108,247,.18)}
+/* 拖动划选预览 - 蓝色高亮明显可见 */
+td.att.selected{outline:3px solid #4A6CF7!important;outline-offset:-3px;z-index:2;box-shadow:0 0 0 4px rgba(74,108,247,.45);background:rgba(74,108,247,.10)}
+td.att.sel-preview{outline:3px dashed #4A6CF7!important;outline-offset:-3px;background:rgba(74,108,247,.18);z-index:1}
 
 /* ===== 批量操作栏（始终显示，直接可用） ===== */
 .batch-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px 16px;background:#FFF5CC;border-bottom:1px solid #F0D060}
