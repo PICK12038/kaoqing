@@ -1743,7 +1743,9 @@ window.toggleBatchMode=function(){
 };
 
 window.batchClearSel=function(){
-  selectedCells={};renderAllGroups();
+  // 只清 selectedCells 和 .selected class，不重渲染 DOM（避免 td 引用失效）
+  document.querySelectorAll('td.att.selected').forEach(function(td){td.classList.remove('selected')});
+  selectedCells={};
   document.getElementById('batch-count').textContent='按住左键拖动划选，已选 0 格';
   updateBatchBar();
 };
@@ -2955,7 +2957,7 @@ function clearDragPreview(){
   _dragPreview=[];
 }
 
-// 计算起点到终点的矩形范围内的所有考勤格（同一表格内）
+// 计算起点到终点的矩形范围内的所有考勤格（同一表格内，仅考勤格列）
 function getRectCells(startTd,endTd){
   if(!startTd||!endTd) return [];
   var st=startTd.closest('table.att-table'),et=endTd.closest('table.att-table');
@@ -2963,8 +2965,13 @@ function getRectCells(startTd,endTd){
   var r1=parseInt(startTd.getAttribute('data-r'),10),r2=parseInt(endTd.getAttribute('data-r'),10);
   var c1=startTd.cellIndex,c2=endTd.cellIndex;
   if(isNaN(r1)||isNaN(r2)) return [];
+  // 列范围收敛到本表考勤格列的边界（避免拖到姓名/序号列时把后面整列都选中）
+  var attCols=getAttColumnRange(st);
+  if(!attCols) return [];
+  var minC=Math.max(Math.min(c1,c2),attCols.min);
+  var maxC=Math.min(Math.max(c1,c2),attCols.max);
+  if(minC>maxC) return [];
   var minR=Math.min(r1,r2),maxR=Math.max(r1,r2);
-  var minC=Math.min(c1,c2),maxC=Math.max(c1,c2);
   var out=[];
   var tds=st.querySelectorAll('tbody td.att');
   for(var i=0;i<tds.length;i++){
@@ -2976,6 +2983,21 @@ function getRectCells(startTd,endTd){
     out.push(td);
   }
   return out;
+}
+
+// 获取表格考勤格列的最小/最大 cellIndex
+function getAttColumnRange(table){
+  var tb=table.querySelector('tbody');
+  if(!tb||tb.rows.length===0) return null;
+  var min=9999,max=-1;
+  var tds=tb.querySelectorAll('td.att');
+  for(var i=0;i<tds.length;i++){
+    var cc=tds[i].cellIndex;
+    if(cc<min) min=cc;
+    if(cc>max) max=cc;
+  }
+  if(max<min) return null;
+  return {min:min,max:max};
 }
 
 document.addEventListener('mousedown',function(e){
@@ -3007,6 +3029,8 @@ document.addEventListener('mouseup',function(e){
       if(!c.classList.contains('selected')) toggleBatchCell(c);
     }
     _dragJustEnded=true;
+    // 自动清除标志，避免残留导致下一次普通点击被吞
+    setTimeout(function(){_dragJustEnded=false},50);
     if(cells.length>0) showToast('已选 '+Object.keys(selectedCells).length+' 格，点状态按钮批量填入');
   }
   clearDragPreview();
