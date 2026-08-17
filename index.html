@@ -312,15 +312,12 @@ td.weekly .has-issue{font-size:13px;line-height:1.3}
 .date-picker .dp-actions button.clear-btn{color:var(--text2)}
 .date-picker .dp-actions button.custom-btn{color:var(--accent);font-weight:600}
 
-/* 批量模式 */
-.batch-mode td.att{outline:1px dashed var(--accent);outline-offset:-1px}
-td.att.selected{outline:2px solid var(--accent)!important;outline-offset:-2px;z-index:1;box-shadow:0 0 0 3px rgba(74,108,247,.15)}
 /* 拖动划选预览 */
+td.att.selected{outline:2px solid var(--accent)!important;outline-offset:-2px;z-index:1;box-shadow:0 0 0 3px rgba(74,108,247,.15)}
 td.att.sel-preview{outline:2px dashed var(--accent)!important;outline-offset:-2px;background:rgba(74,108,247,.18)}
 
-/* ===== 批量操作栏 ===== */
-.batch-bar{display:none;padding:10px 16px;background:#FFF5CC;border-bottom:1px solid #F0D060}
-.batch-bar.show{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+/* ===== 批量操作栏（始终显示，直接可用） ===== */
+.batch-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px 16px;background:#FFF5CC;border-bottom:1px solid #F0D060}
 .batch-bar span{font-size:13px;font-weight:600;color:#8B6914;margin-right:8px}
 
 /* ===== 图例 ===== */
@@ -435,8 +432,6 @@ td.name input{width:100%;border:none;text-align:center;font-size:14px;font-weigh
     <div class="search-result" id="search-result"></div>
   </div>
   <div class="tb-actions">
-    <button class="btn btn-o" onclick="toggleBatchMode()" id="btn-batch" title="按住左键拖动划选多个考勤格，再点状态按钮批量填入">☑ 多选</button>
-    <span class="tb-divider"></span>
     <button class="btn" onclick="openExportModal()">📦 导出</button>
     <button class="btn" onclick="toggleRecycle()" id="btn-recycle">🗑 回收</button>
     <button class="btn" onclick="openChangelog()" style="font-size:12px;padding:6px 10px">📋</button>
@@ -785,7 +780,6 @@ var currentGroup='1组';
 var currentWeek=0; // 当前显示的周索引(0开始)
 var WEEK_SIZE=6;   // 每6天为一周
 var viewMode='class'; // 'class'=按班级显示4组, 'group'=按组显示全部班级
-var batchMode=false;
 
 // ====== 防抖存储：300ms内多次调用只保存一次 ======
 var _saveTimer=null;
@@ -983,7 +977,7 @@ window.toggleViewMode=function(){
     ctEl.style.display='';gtEl.style.display='none';
     renderClassTabs();
   }
-  if(!batchMode) selectedCells={};
+  selectedCells={};
   renderAllGroups();
 };
 
@@ -991,7 +985,7 @@ window.onGroupViewChange=function(gn){
   currentGroup=gn;
   var btns=document.querySelectorAll('#group-tabs .tab-group-btn');
   btns.forEach(function(b){b.classList.toggle('active',b.textContent===gn)});
-  if(!batchMode) selectedCells={};
+  selectedCells={};
   renderAllGroups();
 };
 
@@ -1000,14 +994,13 @@ window.onClassChange=function(ct){
   if(!ct||CLASS_TYPES.indexOf(ct)===-1) return;
   currentClass=ct;
   currentGroup='1组';
-  if(!batchMode) selectedCells={};
+  selectedCells={};
   renderClassTabs();
   renderAllGroups();
   addLog('切换班级','切换到 '+ct);
 };
 
 window.setActiveGroupEx=function(gn,cn){
-  if(batchMode) return;
   currentGroup=gn;
   if(cn) currentClass=cn;
   document.querySelectorAll('.group-header').forEach(function(h){
@@ -1048,7 +1041,8 @@ function renderAllGroups(){
   document.querySelectorAll('.group-header').forEach(function(hd){
     hd.classList.toggle('active',hd.getAttribute('data-c')===currentClass&&hd.getAttribute('data-g')===currentGroup);
   });
-  if(batchMode) document.getElementById('batch-count').textContent='已选 '+Object.keys(selectedCells).length+' 格';
+  updateBatchBar();
+  if(Object.keys(selectedCells).length>0) document.getElementById('batch-count').textContent='已选 '+Object.keys(selectedCells).length+' 格（可点状态按钮批量填入）';
   updateWeekNav();
   updateGlobalStats();
 }
@@ -1135,7 +1129,7 @@ function renderGroupSection(gn,ct){
   }
   h+='</tr></thead>';
 
-  h+='<tbody class="'+(batchMode&&isActive?'batch-mode':'')+'">';
+  h+='<tbody>';
   for(var r=1;r<=mr;r++){
     var name=(r<=students.length)?students[r-1]:'';
     h+='<tr>';
@@ -1226,7 +1220,7 @@ window.goWeek=function(dir){
   var nw=currentWeek+dir;
   if(nw<0||nw>=TOTAL_WEEKS){showToast('已到边界');return}
   currentWeek=nw;
-  if(!batchMode) selectedCells={};
+  selectedCells={};
   var jump=document.getElementById('wn-jump');if(jump) jump.value=currentWeek+1;
   renderAllGroups();
   showToast('▶ 已切换到第 '+(currentWeek+1)+' 周');
@@ -1290,7 +1284,6 @@ function updateAttCell(t,td,r,k,gn,newVal,oldLabel){
 // 右键弹出状态选择菜单
 window.onAttMenu=function(e,td){
   e.preventDefault();e.stopPropagation();
-  if(batchMode){toggleBatchCell(td);return}
   closeAttMenu();
   var menu=document.createElement('div');
   menu.className='att-menu';
@@ -1733,30 +1726,20 @@ function gSel(){
 }
 var selectedCells={};
 
-window.toggleBatchMode=function(){
-  batchMode=!batchMode;
-  document.getElementById('batch-bar').classList.toggle('show',batchMode||Object.keys(selectedCells).length>0);
-  document.getElementById('btn-batch').textContent=batchMode?'☑ 退出多选':'☑ 多选';
-  if(!batchMode){selectedCells={}}
-  else{document.getElementById('batch-count').textContent='按住左键拖动划选，已选 0 格'}
-  renderAllGroups();
-};
-
 window.batchClearSel=function(){
   // 只清 selectedCells 和 .selected class，不重渲染 DOM（避免 td 引用失效）
   document.querySelectorAll('td.att.selected').forEach(function(td){td.classList.remove('selected')});
   selectedCells={};
-  document.getElementById('batch-count').textContent='按住左键拖动划选，已选 0 格';
   updateBatchBar();
 };
 
-// 根据是否有选中格自动显示/隐藏批量操作栏
+// 根据是否有选中格更新批量操作栏计数
 function updateBatchBar(){
   var bar=document.getElementById('batch-bar');
   if(!bar) return;
   var n=Object.keys(selectedCells).length;
-  bar.classList.toggle('show',n>0);
   if(n>0) document.getElementById('batch-count').textContent='已选 '+n+' 格（可点状态按钮批量填入）';
+  else document.getElementById('batch-count').textContent='按住左键拖动划选或点下方按钮，再点状态批量填入';
 }
 
 // 添加选择（不取消，用于全选/整行/整列）
@@ -2935,7 +2918,6 @@ document.addEventListener('click',function(e){
   var td=e.target.closest('td.att');if(!td) return;
   if(e.target.closest('.dd-arrow')) return; // 箭头由onAttMenu处理
   if(_dragJustEnded){_dragJustEnded=false;return} // 拖动划选后的残留click
-  if(batchMode){toggleBatchCell(td);return}
   // 普通点击：若已有选中格则清除选择，再进行单格切换
   if(Object.keys(selectedCells).length>0) batchClearSel();
   var r=td.getAttribute('data-r'),k=td.getAttribute('data-k'),gn=td.getAttribute('data-g'),cn=td.getAttribute('data-c')||currentClass;
@@ -3434,7 +3416,6 @@ document.addEventListener('click',function(e){
 document.addEventListener('click',function(e){
   if(e.target.closest('td.att')) return;
   if(e.target.closest('#batch-bar')) return;
-  if(e.target.closest('#btn-batch')) return;
   if(e.target.closest('#btn-recycle')) return;
   if(Object.keys(selectedCells).length>0) batchClearSel();
 });
