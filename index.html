@@ -315,6 +315,8 @@ td.weekly .has-issue{font-size:13px;line-height:1.3}
 /* 批量模式 */
 .batch-mode td.att{outline:1px dashed var(--accent);outline-offset:-1px}
 td.att.selected{outline:2px solid var(--accent)!important;outline-offset:-2px;z-index:1;box-shadow:0 0 0 3px rgba(74,108,247,.15)}
+/* 拖动划选预览 */
+td.att.sel-preview{outline:2px dashed var(--accent)!important;outline-offset:-2px;background:rgba(74,108,247,.18)}
 
 /* ===== 批量操作栏 ===== */
 .batch-bar{display:none;padding:10px 16px;background:#FFF5CC;border-bottom:1px solid #F0D060}
@@ -433,7 +435,7 @@ td.name input{width:100%;border:none;text-align:center;font-size:14px;font-weigh
     <div class="search-result" id="search-result"></div>
   </div>
   <div class="tb-actions">
-    <button class="btn btn-o" onclick="toggleBatchMode()" id="btn-batch" title="按住 Ctrl 点击多个考勤格，再点状态按钮批量填入">☑ 多选</button>
+    <button class="btn btn-o" onclick="toggleBatchMode()" id="btn-batch" title="按住左键拖动划选多个考勤格，再点状态按钮批量填入">☑ 多选</button>
     <span class="tb-divider"></span>
     <button class="btn" onclick="openExportModal()">📦 导出</button>
     <button class="btn" onclick="toggleRecycle()" id="btn-recycle">🗑 回收</button>
@@ -465,7 +467,7 @@ td.name input{width:100%;border:none;text-align:center;font-size:14px;font-weigh
 
   <!-- 多选批量操作栏 -->
   <div class="batch-bar" id="batch-bar">
-    <span id="batch-count">按住 Ctrl 点击多选，已选 0 格</span>
+    <span id="batch-count">按住左键拖动划选，已选 0 格</span>
     <button class="btn btn-sm" onclick="batchSelectAll()">全选整组</button>
     <button class="btn btn-sm" onclick="batchSelectRow()">整行</button>
     <button class="btn btn-sm" onclick="batchSelectCol()">整列</button>
@@ -1709,7 +1711,7 @@ window.batchApplyQuick=function(st){
   var label=st==='CLEAR'?'清空':st;
   saveDBForce();renderAllGroups();
   updateBatchBar();
-  document.getElementById('batch-count').textContent='按住 Ctrl 点击多选，已选 0 格';
+  document.getElementById('batch-count').textContent='按住左键拖动划选，已选 0 格';
   addLog('批量操作','批量设置 '+keys.length+' 项为 '+label);
   showToast('✅ 已批量设置 '+keys.length+' 项为 '+label);
 };
@@ -1736,13 +1738,13 @@ window.toggleBatchMode=function(){
   document.getElementById('batch-bar').classList.toggle('show',batchMode||Object.keys(selectedCells).length>0);
   document.getElementById('btn-batch').textContent=batchMode?'☑ 退出多选':'☑ 多选';
   if(!batchMode){selectedCells={}}
-  else{document.getElementById('batch-count').textContent='按住 Ctrl 点击多选，已选 0 格'}
+  else{document.getElementById('batch-count').textContent='按住左键拖动划选，已选 0 格'}
   renderAllGroups();
 };
 
 window.batchClearSel=function(){
   selectedCells={};renderAllGroups();
-  document.getElementById('batch-count').textContent='按住 Ctrl 点击多选，已选 0 格';
+  document.getElementById('batch-count').textContent='按住左键拖动划选，已选 0 格';
   updateBatchBar();
 };
 
@@ -2930,12 +2932,8 @@ if(wnToday) wnToday.addEventListener('click',function(){goWeekToday()});
 document.addEventListener('click',function(e){
   var td=e.target.closest('td.att');if(!td) return;
   if(e.target.closest('.dd-arrow')) return; // 箭头由onAttMenu处理
-  // 按住 Ctrl/Cmd 点击 = 多选/取消选中（批量模式）
-  if(e.ctrlKey||e.metaKey||batchMode){
-    e.preventDefault();
-    toggleBatchCell(td);
-    return;
-  }
+  if(_dragJustEnded){_dragJustEnded=false;return} // 拖动划选后的残留click
+  if(batchMode){toggleBatchCell(td);return}
   // 普通点击：若已有选中格则清除选择，再进行单格切换
   if(Object.keys(selectedCells).length>0) batchClearSel();
   var r=td.getAttribute('data-r'),k=td.getAttribute('data-k'),gn=td.getAttribute('data-g'),cn=td.getAttribute('data-c')||currentClass;
@@ -2947,6 +2945,72 @@ document.addEventListener('click',function(e){
 document.addEventListener('contextmenu',function(e){
   var td=e.target.closest('td.att');if(!td) return;
   e.preventDefault();onAttMenu(e,td);
+});
+
+// ====== 鼠标拖动划选（Excel式：按住左键拖动选择多个格子） ======
+var _dragStart=null,_dragPreview=[],_dragJustEnded=false;
+
+function clearDragPreview(){
+  for(var i=0;i<_dragPreview.length;i++){if(_dragPreview[i]) _dragPreview[i].classList.remove('sel-preview')}
+  _dragPreview=[];
+}
+
+// 计算起点到终点的矩形范围内的所有考勤格（同一表格内）
+function getRectCells(startTd,endTd){
+  if(!startTd||!endTd) return [];
+  var st=startTd.closest('table.att-table'),et=endTd.closest('table.att-table');
+  if(st!==et) return [];
+  var r1=parseInt(startTd.getAttribute('data-r'),10),r2=parseInt(endTd.getAttribute('data-r'),10);
+  var c1=startTd.cellIndex,c2=endTd.cellIndex;
+  if(isNaN(r1)||isNaN(r2)) return [];
+  var minR=Math.min(r1,r2),maxR=Math.max(r1,r2);
+  var minC=Math.min(c1,c2),maxC=Math.max(c1,c2);
+  var out=[];
+  var tds=st.querySelectorAll('tbody td.att');
+  for(var i=0;i<tds.length;i++){
+    var td=tds[i];
+    var rr=parseInt(td.getAttribute('data-r'),10);
+    if(isNaN(rr)||rr<minR||rr>maxR) continue;
+    var cc=td.cellIndex;
+    if(cc<minC||cc>maxC) continue;
+    out.push(td);
+  }
+  return out;
+}
+
+document.addEventListener('mousedown',function(e){
+  if(e.button!==0) return;
+  var td=e.target.closest('td.att');if(!td) return;
+  if(e.target.closest('.dd-arrow')) return;
+  _dragStart={td:td,r:parseInt(td.getAttribute('data-r'),10)};
+});
+
+document.addEventListener('mousemove',function(e){
+  if(!_dragStart) return;
+  if((e.buttons&1)===0){_dragStart=null;clearDragPreview();return}
+  var td=e.target.closest('td.att');
+  if(!td){clearDragPreview();return}
+  clearDragPreview();
+  var cells=getRectCells(_dragStart.td,td);
+  for(var i=0;i<cells.length;i++) cells[i].classList.add('sel-preview');
+  _dragPreview=cells;
+});
+
+document.addEventListener('mouseup',function(e){
+  if(!_dragStart) return;
+  var endTd=e.target.closest('td.att');
+  if(endTd&&_dragStart.td!==endTd){
+    // 拖动划选：把矩形内格子加入选中
+    var cells=getRectCells(_dragStart.td,endTd);
+    for(var i=0;i<cells.length;i++){
+      var c=cells[i];
+      if(!c.classList.contains('selected')) toggleBatchCell(c);
+    }
+    _dragJustEnded=true;
+    if(cells.length>0) showToast('已选 '+Object.keys(selectedCells).length+' 格，点状态按钮批量填入');
+  }
+  clearDragPreview();
+  _dragStart=null;
 });
 
 // ====== 悬停十字定位高亮（行+列） ======
