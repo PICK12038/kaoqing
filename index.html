@@ -1738,8 +1738,8 @@ function updateBatchBar(){
   var bar=document.getElementById('batch-bar');
   if(!bar) return;
   var n=Object.keys(selectedCells).length;
-  if(n>0) document.getElementById('batch-count').textContent='已选 '+n+' 格（可点状态按钮批量填入）';
-  else document.getElementById('batch-count').textContent='按住左键拖动划选或点下方按钮，再点状态批量填入';
+  if(n>0) document.getElementById('batch-count').textContent='已选 '+n+' 格（点下方状态按钮填入，双击单格可快速切换）';
+  else document.getElementById('batch-count').textContent='单击选中格子 / 按住左键拖动划选，再点状态按钮填入';
 }
 
 // 添加选择（不取消，用于全选/整行/整列）
@@ -2913,19 +2913,36 @@ if(wnPrev) wnPrev.addEventListener('click',function(){goWeek(-1)});
 if(wnNext) wnNext.addEventListener('click',function(){goWeek(1)});
 if(wnToday) wnToday.addEventListener('click',function(){goWeekToday()});
 
-// ====== 事件委托：统一处理考勤格点击 ======
+// ====== 事件委托：统一处理考勤格点击（Excel模式：单击选中，双击编辑，拖动多选） ======
 document.addEventListener('click',function(e){
   var td=e.target.closest('td.att');if(!td) return;
   if(e.target.closest('.dd-arrow')) return; // 箭头由onAttMenu处理
   if(_dragJustEnded){_dragJustEnded=false;return} // 拖动划选后的残留click
-  // 普通点击：若已有选中格则清除选择，再进行单格切换
-  if(Object.keys(selectedCells).length>0) batchClearSel();
+  // Excel模式：单击 = 单选选中该格（不立即改状态），选中后点状态按钮填入
+  selectOnlyCell(td);
+});
+// Excel模式：双击 = 快速循环切换状态（类似Excel双击编辑内容）
+document.addEventListener('dblclick',function(e){
+  var td=e.target.closest('td.att');if(!td) return;
+  if(e.target.closest('.dd-arrow')) return;
   var r=td.getAttribute('data-r'),k=td.getAttribute('data-k'),gn=td.getAttribute('data-g'),cn=td.getAttribute('data-c')||currentClass;
   var t=getTableByGroup(gn,cn);if(!t) return;
   var cur=td.getAttribute('data-status')||'';
   var idx=CYCLE.indexOf(cur)+1;if(idx>=CYCLE.length) idx=0;
   updateAttCell(t,td,r,k,gn,CYCLE[idx],cur||'(空)');
+  // 切换后保持选中，方便继续用状态按钮调整
+  if(!td.classList.contains('selected')) selectOnlyCell(td);
 });
+// 单选选中一个格子（清空其它选中，只保留当前格）
+function selectOnlyCell(td){
+  if(td.classList.contains('selected')&&Object.keys(selectedCells).length===1) return; // 已单选该格
+  document.querySelectorAll('td.att.selected').forEach(function(t){t.classList.remove('selected')});
+  selectedCells={};
+  var r=td.getAttribute('data-r'),k=td.getAttribute('data-k'),gn=td.getAttribute('data-g'),cn=td.getAttribute('data-c')||currentClass;
+  selectedCells[cn+'_'+gn+'_'+r+'_'+k]=true;
+  td.classList.add('selected');
+  updateBatchBar();
+}
 document.addEventListener('contextmenu',function(e){
   var td=e.target.closest('td.att');if(!td) return;
   e.preventDefault();onAttMenu(e,td);
