@@ -312,9 +312,11 @@ td.weekly .has-issue{font-size:13px;line-height:1.3}
 .date-picker .dp-actions button.clear-btn{color:var(--text2)}
 .date-picker .dp-actions button.custom-btn{color:var(--accent);font-weight:600}
 
-/* 拖动划选预览 - Excel 式：浅蓝填充 + 蓝实线框（去掉发光） */
-td.att.selected{outline:2px solid #1F6FEB!important;outline-offset:-2px;z-index:2;background:rgba(31,111,235,.12);box-shadow:none}
-td.att.sel-preview{background:rgba(31,111,235,.20);z-index:1;outline:none}
+/* 选择系统 v3 - Excel 式蓝色选中 + 虚线预览 + 拖动光标 */
+td.att.selected{outline:2px solid #1F6FEB!important;outline-offset:-2px;z-index:2;background:rgba(31,111,235,.12)!important;box-shadow:none}
+td.att.sel-preview{background:rgba(31,111,235,.22)!important;z-index:1;outline:1px dashed rgba(31,111,235,.6);outline-offset:-2px}
+body.sel-dragging{user-select:none!important;-webkit-user-select:none!important;cursor:crosshair!important}
+body.sel-dragging td.att{cursor:crosshair!important}
 
 /* ===== 批量操作栏（始终显示，直接可用） ===== */
 .batch-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px 16px;background:#FFF5CC;border-bottom:1px solid #F0D060}
@@ -977,7 +979,7 @@ window.toggleViewMode=function(){
     ctEl.style.display='';gtEl.style.display='none';
     renderClassTabs();
   }
-  selectedCells={};
+  SelectionManager.clear();
   renderAllGroups();
 };
 
@@ -985,7 +987,7 @@ window.onGroupViewChange=function(gn){
   currentGroup=gn;
   var btns=document.querySelectorAll('#group-tabs .tab-group-btn');
   btns.forEach(function(b){b.classList.toggle('active',b.textContent===gn)});
-  selectedCells={};
+  SelectionManager.clear();
   renderAllGroups();
 };
 
@@ -994,7 +996,7 @@ window.onClassChange=function(ct){
   if(!ct||CLASS_TYPES.indexOf(ct)===-1) return;
   currentClass=ct;
   currentGroup='1组';
-  selectedCells={};
+  SelectionManager.clear();
   renderClassTabs();
   renderAllGroups();
   addLog('切换班级','切换到 '+ct);
@@ -1042,7 +1044,7 @@ function renderAllGroups(){
     hd.classList.toggle('active',hd.getAttribute('data-c')===currentClass&&hd.getAttribute('data-g')===currentGroup);
   });
   updateBatchBar();
-  if(Object.keys(selectedCells).length>0) document.getElementById('batch-count').textContent='已选 '+Object.keys(selectedCells).length+' 格（可点状态按钮批量填入）';
+  if(selCount()>0) document.getElementById('batch-count').textContent='已选 '+selCount()+' 格（可点状态按钮批量填入）';
   updateWeekNav();
   updateGlobalStats();
 }
@@ -1142,7 +1144,7 @@ function renderGroupSection(gn,ct){
         var k=gd+'_'+p,v=(data[r]&&data[r][k])||'',st=STATUS[v]||{};
         var sty=st.bg?'background:'+st.bg+';color:'+st.fc:'';
         var sk=cName+'_'+gn+'_'+r+'_'+k;
-        h+='<td class="att'+(selectedCells[sk]?' selected':'')+'" data-r="'+r+'" data-k="'+k+'" data-g="'+gn+'" data-c="'+cName+'" data-status="'+(v||'')+'">';
+        h+='<td class="att'+(selHas(sk)?' selected':'')+'" data-r="'+r+'" data-k="'+k+'" data-g="'+gn+'" data-c="'+cName+'" data-status="'+(v||'')+'">';
         h+='<div class="val" style="'+(st.bg?'background:'+st.bg+';color:'+st.fc:'')+'">'+(v||'')+'</div><div class="dd-arrow" onclick="event.stopPropagation();onAttMenu(event,this.parentElement)">▾</div></td>';
       }
     }
@@ -1220,7 +1222,7 @@ window.goWeek=function(dir){
   var nw=currentWeek+dir;
   if(nw<0||nw>=TOTAL_WEEKS){showToast('已到边界');return}
   currentWeek=nw;
-  selectedCells={};
+  SelectionManager.clear();
   var jump=document.getElementById('wn-jump');if(jump) jump.value=currentWeek+1;
   renderAllGroups();
   showToast('▶ 已切换到第 '+(currentWeek+1)+' 周');
@@ -1664,14 +1666,18 @@ function findEt(eid){
   return null;
 }
 
+// ====== 多选系统 v3（SelectionManager + PointerDragController 工业级重构） ======
+// 架构：状态机模式 + 单数据源 + RAF 批量 DOM 同步 + 会话令牌防泄漏
+// 容错：null 安全、属性缺失回退、最大选择数限制、异常 try-catch
+
 window.batchApplyQuick=function(st){
-  var keys=Object.keys(selectedCells);
+  var keys=SelectionManager.keys();
   if(keys.length===0){showToast('请先点击格子选择');return}
   saveDB(); // 确保任何挂起的保存先执行
   var groups={},errorCount=0;
   keys.forEach(function(key){
-    var info=keyInfo(key);
-    if(!info.cn||!info.gn||!info.r||info.k===undefined){errorCount++;return}
+    var info=SelectionManager.keyInfo(key);
+    if(!info.cn||!info.gn||!info.r||info.k===''){errorCount++;return}
     if(!groups[info.cn]) groups[info.cn]={};
     if(!groups[info.cn][info.gn]) groups[info.cn][info.gn]={};
     if(!groups[info.cn][info.gn][info.r]) groups[info.cn][info.gn][info.r]={};
@@ -1688,105 +1694,170 @@ window.batchApplyQuick=function(st){
       });
     });
   });
-  selectedCells={};
+  SelectionManager.clear();
   var label=st==='CLEAR'?'清空':st;
   saveDBForce();renderAllGroups();
   updateBatchBar();
-  document.getElementById('batch-count').textContent='按住左键拖动划选，已选 0 格';
+  var _bc=document.getElementById('batch-count');if(_bc) _bc.textContent='按住左键拖动划选，已选 0 格';
   addLog('批量操作','批量设置 '+keys.length+' 项为 '+label);
   showToast('✅ 已批量设置 '+keys.length+' 项为 '+label);
 };
 
-// ====== 多选系统 v2（统一选择函数组，单数据源 selectedCells） ======
-// key 唯一格式：班级_组_行_键；容错缺失属性
-function cellKey(td){
-  return (td.getAttribute('data-c')||currentClass)+'_'+(td.getAttribute('data-g')||'')+'_'+(td.getAttribute('data-r')||'')+'_'+(td.getAttribute('data-k')||'');
-}
-function keyInfo(key){
-  var p=String(key).split('_');
-  return {cn:p[0]||'',gn:p[1]||'',r:p[2]||'',k:p.slice(3).join('_')};
-}
-function selCount(){return Object.keys(selectedCells).length}
-var selectedCells={};
+// ====== SelectionManager 核心选择管理器 ======
+// 工业级状态管理：单数据源 + RAF 批量 DOM 同步 + 原型链隔离 + 安全上限
+var SelectionManager=(function(){
+  'use strict';
+  var _store=Object.create(null); // key→true（原型链隔离，防 __proto__ 注入）
+  var _rafPending=false;
+  var MAX_CELLS=8000; // 安全上限
 
-// 选择操作：清空 / 添加 / 切换 / 单选替换
-function selClearAll(){
-  document.querySelectorAll('td.att.selected').forEach(function(t){t.classList.remove('selected')});
-  selectedCells={};
-}
-function selAdd(td){
-  var k=cellKey(td);
-  if(!selectedCells[k]){selectedCells[k]=true;td.classList.add('selected')}
-}
-function selToggle(td){
-  var k=cellKey(td);
-  if(selectedCells[k]){delete selectedCells[k];td.classList.remove('selected')}
-  else{selectedCells[k]=true;td.classList.add('selected')}
-}
-function selReplace(td){
-  if(selectedCells[cellKey(td)]&&selCount()===1) return; // 已单选该格
-  selClearAll();
-  selAdd(td);
-  updateBatchBar();
-}
-// 对当前组所有考勤格执行选择操作（全选/反选共用）
-function selApplyInGroup(fn){
-  var tds=document.querySelectorAll(gSel()+' td.att');
-  tds.forEach(function(td){fn(td)});
-  updateBatchBar();
-}
-function gSel(){
-  if(viewMode==='group') return '#group-'+currentClass.replace(/班/g,'b')+'-'+currentGroup;
+  function cellKey(td){
+    if(!td||td.nodeType!==1) return '';
+    var c=td.getAttribute('data-c')||'',g=td.getAttribute('data-g')||'',
+        r=td.getAttribute('data-r')||'',k=td.getAttribute('data-k')||'';
+    if(!c||!g||!r||k==='') return '';
+    return c+'_'+g+'_'+r+'_'+k;
+  }
+  function keyInfo(key){
+    if(typeof key!=='string'||!key) return{cn:'',gn:'',r:'',k:''};
+    var p=key.split('_');
+    return{cn:p[0]||'',gn:p[1]||'',r:p[2]||'',k:p.slice(3).join('_')};
+  }
+  function _count(){
+    var n=0;for(var k in _store){if(_store[k]) n++;}
+    return n;
+  }
+  function _keys(){
+    var a=[];for(var k in _store){if(_store[k]) a.push(k);}
+    return a;
+  }
+  function _scheduleSync(){
+    if(_rafPending) return;
+    if(typeof requestAnimationFrame!=='function') return;
+    _rafPending=true;
+    requestAnimationFrame(function(){
+      _rafPending=false;
+      try{
+        var tds=document.querySelectorAll('td.att');
+        for(var i=0,len=tds.length;i<len;i++){
+          var td=tds[i],k=cellKey(td);
+          if(!k) continue;
+          if(_store[k]) td.classList.add('selected');
+          else td.classList.remove('selected');
+        }
+      }catch(e){/* DOM 可能正在重建，下次 RAF 再同步 */}
+    });
+  }
+  return{
+    cellKey:cellKey, keyInfo:keyInfo,
+    count:_count, keys:_keys,
+    has:function(key){return!!_store[key];},
+    isSelectedForRender:function(key){return!!_store[key];},
+    clear:function(){_store=Object.create(null);_scheduleSync();},
+    resetForRender:function(){_store=Object.create(null);},
+    add:function(td){
+      var k=cellKey(td);if(!k) return false;
+      if(!_store[k]){
+        if(_count()>=MAX_CELLS) return false;
+        _store[k]=true;td.classList.add('selected');
+      }
+      return true;
+    },
+    remove:function(td){
+      var k=cellKey(td);if(!k) return;
+      if(_store[k]){delete _store[k];td.classList.remove('selected');}
+    },
+    toggle:function(td){
+      var k=cellKey(td);if(!k) return;
+      if(_store[k]){delete _store[k];td.classList.remove('selected');}
+      else{if(_count()>=MAX_CELLS) return;_store[k]=true;td.classList.add('selected');}
+    },
+    replace:function(td){
+      var k=cellKey(td);if(!k) return;
+      if(_store[k]&&_count()===1) return; // 已单选该格
+      // 新格立即显示（视觉即时反馈），旧格用 RAF 批量清理
+      if(_store[k]) td.classList.add('selected');
+      _store=Object.create(null);_store[k]=true;
+      _scheduleSync();
+    },
+    addBatch:function(tds){
+      if(!tds||!tds.length) return;
+      for(var i=0;i<tds.length;i++){
+        var k=cellKey(tds[i]);if(!k) continue;
+        if(!_store[k]){if(_count()>=MAX_CELLS) break;_store[k]=true;}
+      }
+      _scheduleSync();
+    },
+    applyInGroup:function(fn){
+      var sel=_gSel();if(!sel) return;
+      var tds;try{tds=document.querySelectorAll(sel+' td.att');}catch(e){return;}
+      for(var i=0;i<tds.length;i++) fn.call(this,tds[i]);
+      _scheduleSync();
+    }
+  };
+})();
+
+// ---- 向后兼容函数包装 ----
+function cellKey(td){return SelectionManager.cellKey(td);}
+function keyInfo(key){return SelectionManager.keyInfo(key);}
+function selCount(){return SelectionManager.count();}
+function selHas(key){return SelectionManager.has(key);}
+function selKeys(){return SelectionManager.keys();}
+function selClearAll(){SelectionManager.clear();}
+function selAdd(td){SelectionManager.add(td);}
+function selToggle(td){SelectionManager.toggle(td);}
+function selReplace(td){SelectionManager.replace(td);updateBatchBar();}
+function selApplyInGroup(fn){SelectionManager.applyInGroup(fn);updateBatchBar();}
+function _gSel(){
+  if(typeof viewMode==='undefined'||typeof currentClass==='undefined'||typeof currentGroup==='undefined') return '';
+  if(viewMode==='group') return '#group-'+String(currentClass).replace(/班/g,'b')+'-'+currentGroup;
   return '#group-'+currentGroup;
 }
+function gSel(){return _gSel();}
 
-// 清空选择（不重渲染 DOM，避免 td 引用失效）
-window.batchClearSel=function(){
-  selClearAll();
-  updateBatchBar();
-};
+// 清空选择
+window.batchClearSel=function(){selClearAll();updateBatchBar();};
 
-// 更新批量操作栏计数与提示
+// 更新批量操作栏
 function updateBatchBar(){
-  var bar=document.getElementById('batch-bar');
-  if(!bar) return;
+  var bar=document.getElementById('batch-bar');if(!bar) return;
+  var bc=document.getElementById('batch-count');if(!bc) return;
   var n=selCount();
-  if(n>0) document.getElementById('batch-count').textContent='已选 '+n+' 格（点状态按钮填入，双击单格快速切换）';
-  else document.getElementById('batch-count').textContent='单击选中 / 按住左键拖动划选，再点状态按钮填入';
+  if(n>0) bc.textContent='已选 '+n+' 格（点状态按钮填入，双击单格快速切换）';
+  else bc.textContent='单击选中 / 按住左键拖动划选，再点状态按钮填入';
 }
 
 window.batchSelectAll=function(){selApplyInGroup(selAdd)};
 window.batchSelectRow=function(){
-  var rows=document.querySelectorAll(gSel()+' .att-table tbody tr');
-  rows.forEach(function(tr){
-    tr.querySelectorAll('td.att').forEach(selAdd);
-  });
+  var sel=gSel();if(!sel) return;
+  var rows;try{rows=document.querySelectorAll(sel+' .att-table tbody tr');}catch(e){return;}
+  rows.forEach(function(tr){tr.querySelectorAll('td.att').forEach(selAdd);});
   updateBatchBar();
 };
 window.batchSelectCol=function(){
   var ps=safePeriods(),dates=safeDates(getCurrentTable());
   if(!dates.length) return;
-  // 弹出简易选择：让用户选第几天
   var msg='选择要批量选中的日期：\n';
   for(var d=0;d<dates.length;d++) msg+='['+(d+1)+'] '+(dates[d].d||('第'+(d+1)+'天'))+'\n';
   msg+='输入数字：';
   var choice=parseInt(prompt(msg,'1'),10);
   if(isNaN(choice)||choice<1||choice>dates.length) return;
   var dIdx=choice-1;
-  var tds=document.querySelectorAll(gSel()+' td.att');
+  var sel=gSel();if(!sel) return;
+  var tds;try{tds=document.querySelectorAll(sel+' td.att');}catch(e){return;}
   tds.forEach(function(td){
-    var k=td.getAttribute('data-k');
-    // k格式为 "d_p"，如"0_0"
+    var k=td.getAttribute('data-k');if(!k) return;
     var parts=k.split('_'),kd=parseInt(parts[0],10);
+    if(isNaN(kd)) return;
     if(kd===dIdx) selAdd(td);
   });
   updateBatchBar();
 };
 window.batchInvert=function(){selApplyInGroup(selToggle)};
 
-// 批量删除学生姓名
+// 批量删除学生
 window.batchDeleteStudents=function(){
-  var keys=Object.keys(selectedCells);
+  var keys=selKeys();
   if(!keys.length){showToast('请先选择要删除的学生的格子');return}
   var studentsToDel=[];
   keys.forEach(function(key){
@@ -1802,17 +1873,15 @@ window.batchDeleteStudents=function(){
   var backupStudents=[],backupData={},backupCustom={};
   
   studentsToDel.forEach(function(r){
-    var name=t.students[r-1]||'';
+    var name=(t.students&&t.students[r-1])||'';
     backupStudents.push({row:r,name:name});
-    if(t.data[r]){backupData[r]=JSON.parse(JSON.stringify(t.data[r]));delete t.data[r]}
+    if(t.data&&t.data[r]){backupData[r]=JSON.parse(JSON.stringify(t.data[r]));delete t.data[r]}
     if(t.customData&&t.customData[r]){backupCustom[r]=JSON.parse(JSON.stringify(t.customData[r]));delete t.customData[r]}
-    // 标记删除（设空值，后续批量清理）
-    t.students[r-1]='';
+    if(t.students) t.students[r-1]='';
   });
   
-  // 从末尾清除空姓名
-  while(t.students.length>0&&!t.students[t.students.length-1].trim()){
-    t.students.pop();
+  if(t.students){
+    while(t.students.length>0&&!t.students[t.students.length-1].trim()) t.students.pop();
   }
   
   if(Object.keys(backupData).length>0){
@@ -1824,7 +1893,7 @@ window.batchDeleteStudents=function(){
     });
   }
   
-  selectedCells={};saveDBForce();renderAllGroups();
+  SelectionManager.clear();saveDBForce();renderAllGroups();
   updateBatchBar();
   addLog('删除学生','删除 '+currentClass+' '+currentGroup+' '+studentsToDel.length+'人');
   showToast('🗑 已删除 '+studentsToDel.length+' 名学生（移至回收站）');
@@ -2891,7 +2960,13 @@ function showToast(msg){
 
 // ====== 快捷键 ======
 document.addEventListener('keydown',function(e){
-  if(e.key==='Escape'){document.querySelectorAll('.modal-overlay.show').forEach(function(m){m.classList.remove('show')})}
+  if(e.key==='Escape'){
+    // 优先关闭模态框
+    var mods=document.querySelectorAll('.modal-overlay.show');
+    if(mods.length>0){mods.forEach(function(m){m.classList.remove('show')});return}
+    // 其次清除多选
+    if(selCount()>0){SelectionManager.clear();updateBatchBar();return}
+  }
 });
 
 // ====== 启动 ======
@@ -2905,15 +2980,141 @@ if(wnPrev) wnPrev.addEventListener('click',function(){goWeek(-1)});
 if(wnNext) wnNext.addEventListener('click',function(){goWeek(1)});
 if(wnToday) wnToday.addEventListener('click',function(){goWeekToday()});
 
-// ====== 事件委托 v2：单击选中 / 双击切换 / 拖动划选 / 长按选中 ======
-var _lastPtrDragAt=0; // 拖动/长按结束后抑制残留click的时间戳（容错：带时间差，不会残留卡死）
+// ====== PointerDragController 指针状态机 v3 ======
+// 状态机：IDLE→PENDING→DRAGGING→IDLE + pointercancel/blur/visibilitychange 自动清理
+// 会话令牌（_session）防止过期回调、RAF 节流、距离阈值、长按定时器
+var PointerDragController=(function(){
+  'use strict';
+  var STATE={IDLE:0,PENDING:1,DRAGGING:2};
+  var DRAG_THRESHOLD=6, LONGPRESS_MS=350, CLICK_SUPPRESS_MS=250;
+  var _state=STATE.IDLE, _session=0, _start=null, _lastTd=null;
+  var _moved=false, _longPressTimer=null, _raf=null, _lastDragEnd=0;
+  var _preview=[];
+
+  function _clearPreview(){
+    for(var i=0;i<_preview.length;i++){if(_preview[i]) _preview[i].classList.remove('sel-preview');}
+    _preview=[];
+  }
+  function _getAttColumnRange(table){
+    if(!table) return null;
+    var tb=table.querySelector('tbody');
+    if(!tb||!tb.rows||tb.rows.length===0) return null;
+    var min=9999,max=-1;
+    try{
+      var tds=tb.querySelectorAll('td.att');
+      for(var i=0;i<tds.length;i++){
+        var cc=tds[i].cellIndex;
+        if(typeof cc!=='number') continue;
+        if(cc<min) min=cc;
+        if(cc>max) max=cc;
+      }
+    }catch(e){return null;}
+    if(max<min) return null;
+    return{min:min,max:max};
+  }
+  function _getRectCells(startTd,endTd){
+    if(!startTd||!endTd) return [];
+    var st=startTd.closest('table.att-table'),et=endTd.closest('table.att-table');
+    if(!st||st!==et) return []; // 跨表不允许
+    var r1=parseInt(startTd.getAttribute('data-r'),10),r2=parseInt(endTd.getAttribute('data-r'),10);
+    if(isNaN(r1)||isNaN(r2)) return [];
+    var c1=startTd.cellIndex,c2=endTd.cellIndex;
+    if(typeof c1!=='number'||typeof c2!=='number') return [];
+    var attCols=_getAttColumnRange(st);
+    if(!attCols) return [];
+    var minC=Math.max(Math.min(c1,c2),attCols.min),maxC=Math.min(Math.max(c1,c2),attCols.max);
+    if(minC>maxC) return [];
+    var minR=Math.min(r1,r2),maxR=Math.max(r1,r2),out=[];
+    var tds;
+    try{tds=st.querySelectorAll('tbody td.att');}catch(e){return [];}
+    for(var i=0;i<tds.length;i++){
+      var td=tds[i],rr=parseInt(td.getAttribute('data-r'),10);
+      if(isNaN(rr)||rr<minR||rr>maxR) continue;
+      var cc=td.cellIndex;
+      if(cc<minC||cc>maxC) continue;
+      out.push(td);
+    }
+    return out;
+  }
+  function _reset(){
+    if(_longPressTimer){clearTimeout(_longPressTimer);_longPressTimer=null;}
+    if(_raf){if(typeof cancelAnimationFrame==='function') cancelAnimationFrame(_raf);_raf=null;}
+    _clearPreview();
+    document.body.classList.remove('sel-dragging');
+    _state=STATE.IDLE;_start=null;_lastTd=null;_moved=false;
+    if(typeof updateBatchBar==='function') updateBatchBar();
+  }
+  return{
+    STATE:STATE,
+    isDragging:function(){return _state===STATE.DRAGGING;},
+    isPending:function(){return _state===STATE.PENDING;},
+    isActive:function(){return _state!==STATE.IDLE;},
+    shouldSuppressClick:function(){return Date.now()-_lastDragEnd<CLICK_SUPPRESS_MS;},
+    onDown:function(e,td){
+      if(e.button!==0||!td) return;
+      _session++;var sid=_session;
+      _state=STATE.PENDING;
+      _start={td:td,x:e.clientX,y:e.clientY};
+      _lastTd=td;_moved=false;_longPressTimer=null;
+      _longPressTimer=setTimeout(function(){
+        if(sid!==_session||_state===STATE.IDLE) return;
+        if(_state===STATE.PENDING){
+          _state=STATE.DRAGGING;
+          document.body.classList.add('sel-dragging');
+          SelectionManager.add(_start.td);
+          if(typeof showToast==='function') showToast('已选中，继续拖动可扩展选区');
+        }
+      },LONGPRESS_MS);
+    },
+    onMove:function(e,td){
+      if(_state===STATE.IDLE||!_start) return;
+      if(_state===STATE.PENDING){
+        var dx=Math.abs(e.clientX-_start.x),dy=Math.abs(e.clientY-_start.y);
+        if(dx<=DRAG_THRESHOLD&&dy<=DRAG_THRESHOLD) return;
+        _state=STATE.DRAGGING;_moved=true;
+        if(_longPressTimer){clearTimeout(_longPressTimer);_longPressTimer=null;}
+        document.body.classList.add('sel-dragging');
+      }
+      if(_state!==STATE.DRAGGING) return;
+      if(!td){_clearPreview();_lastTd=null;return;}
+      if(td===_lastTd) return;
+      _lastTd=td;
+      if(_raf) cancelAnimationFrame(_raf);
+      _raf=requestAnimationFrame(function(){
+        _raf=null;_clearPreview();
+        var cells=_getRectCells(_start.td,td);
+        for(var i=0;i<cells.length;i++) cells[i].classList.add('sel-preview');
+        _preview=cells;
+      });
+    },
+    onUp:function(e,td){
+      if(_state===STATE.IDLE||!_start){_reset();return;}
+      if(_longPressTimer){clearTimeout(_longPressTimer);_longPressTimer=null;}
+      if(_raf){cancelAnimationFrame(_raf);_raf=null;}
+      if(_state===STATE.DRAGGING&&td&&td!==_start.td){
+        var cells=_getRectCells(_start.td,td);
+        SelectionManager.addBatch(cells);
+        _lastDragEnd=Date.now();
+        if(cells.length>0&&typeof showToast==='function') showToast('已选 '+selCount()+' 格，点状态按钮批量填入');
+      }else if(_state===STATE.DRAGGING){
+        _lastDragEnd=Date.now();
+      }
+      _reset();
+    },
+    cancel:function(){if(_state!==STATE.IDLE) _reset();}
+  };
+})();
+
+// ====== 事件委托层 v3 ======
+// 单击 = 单选选中该格（不立即改状态）
 document.addEventListener('click',function(e){
   var td=e.target.closest('td.att');if(!td) return;
-  if(e.target.closest('.dd-arrow')) return; // 箭头由onAttMenu处理
-  if(Date.now()-_lastPtrDragAt<200) return; // 拖动/长按后的残留click
-  selReplace(td); // 单击 = 单选选中该格（不立即改状态）
+  if(e.target.closest('.dd-arrow')) return;
+  if(PointerDragController.shouldSuppressClick()) return;
+  SelectionManager.replace(td);
+  updateBatchBar();
 });
-// 双击 = 快速循环切换状态（类似Excel双击编辑内容）
+// 双击 = 循环切换状态
 document.addEventListener('dblclick',function(e){
   var td=e.target.closest('td.att');if(!td) return;
   if(e.target.closest('.dd-arrow')) return;
@@ -2922,123 +3123,33 @@ document.addEventListener('dblclick',function(e){
   var cur=td.getAttribute('data-status')||'';
   var idx=CYCLE.indexOf(cur)+1;if(idx>=CYCLE.length) idx=0;
   updateAttCell(t,td,r,k,gn,CYCLE[idx],cur||'(空)');
-  // 切换后保持选中，方便继续用状态按钮调整
-  if(!td.classList.contains('selected')) selReplace(td);
+  if(!td.classList.contains('selected')) SelectionManager.replace(td);
 });
+// 右键菜单
 document.addEventListener('contextmenu',function(e){
   var td=e.target.closest('td.att');if(!td) return;
   e.preventDefault();onAttMenu(e,td);
 });
-
-// ====== 指针事件层 v2（统一 单击/拖动/长按 判定；距离阈值+RAF节流） ======
-var _ptr={start:null,last:null,moved:false,timer:null,longPress:false,raf:null};
-var _dragPreview=[];
-
-function clearDragPreview(){
-  for(var i=0;i<_dragPreview.length;i++){if(_dragPreview[i]) _dragPreview[i].classList.remove('sel-preview')}
-  _dragPreview=[];
-}
-
-// 计算起点到终点的矩形范围内的所有考勤格（同一表格内，仅考勤格列）
-function getRectCells(startTd,endTd){
-  if(!startTd||!endTd) return [];
-  var st=startTd.closest('table.att-table'),et=endTd.closest('table.att-table');
-  if(st!==et) return [];
-  var r1=parseInt(startTd.getAttribute('data-r'),10),r2=parseInt(endTd.getAttribute('data-r'),10);
-  var c1=startTd.cellIndex,c2=endTd.cellIndex;
-  if(isNaN(r1)||isNaN(r2)) return [];
-  // 列范围收敛到本表考勤格列的边界（避免拖到姓名/序号列时把后面整列都选中）
-  var attCols=getAttColumnRange(st);
-  if(!attCols) return [];
-  var minC=Math.max(Math.min(c1,c2),attCols.min);
-  var maxC=Math.min(Math.max(c1,c2),attCols.max);
-  if(minC>maxC) return [];
-  var minR=Math.min(r1,r2),maxR=Math.max(r1,r2);
-  var out=[];
-  var tds=st.querySelectorAll('tbody td.att');
-  for(var i=0;i<tds.length;i++){
-    var td=tds[i];
-    var rr=parseInt(td.getAttribute('data-r'),10);
-    if(isNaN(rr)||rr<minR||rr>maxR) continue;
-    var cc=td.cellIndex;
-    if(cc<minC||cc>maxC) continue;
-    out.push(td);
-  }
-  return out;
-}
-
-// 获取表格考勤格列的最小/最大 cellIndex
-function getAttColumnRange(table){
-  var tb=table.querySelector('tbody');
-  if(!tb||tb.rows.length===0) return null;
-  var min=9999,max=-1;
-  var tds=tb.querySelectorAll('td.att');
-  for(var i=0;i<tds.length;i++){
-    var cc=tds[i].cellIndex;
-    if(cc<min) min=cc;
-    if(cc>max) max=cc;
-  }
-  if(max<min) return null;
-  return {min:min,max:max};
-}
-
-// 指针按下：记录起点 + 启动长按定时器（350ms）
+// 指针事件
 document.addEventListener('pointerdown',function(e){
   if(e.button!==0) return;
   var td=e.target.closest('td.att');if(!td) return;
   if(e.target.closest('.dd-arrow')) return;
-  var p={start:{td:td,x:e.clientX,y:e.clientY},last:td,moved:false,longPress:false,timer:null,raf:null};
-  _ptr=p;
-  p.timer=setTimeout(function(){
-    if(_ptr!==p||!p.start) return;
-    p.longPress=true;
-    selAdd(p.start.td); // 长按自动选中起点
-    showToast('已选中，继续拖动可扩展选区，或点状态按钮填入');
-  },350);
+  PointerDragController.onDown(e,td);
 });
-
-// 指针移动：移动距离>6px判定为拖动 → RAF节流绘制矩形预览
 document.addEventListener('pointermove',function(e){
-  var p=_ptr;if(!p||!p.start) return;
-  if(!p.moved){
-    var dx=Math.abs(e.clientX-p.start.x),dy=Math.abs(e.clientY-p.start.y);
-    if(dx<=6&&dy<=6) return;
-    p.moved=true;
-    clearTimeout(p.timer);
-  }
+  if(!PointerDragController.isActive()) return;
   var td=e.target.closest('td.att');
-  if(!td){clearDragPreview();p.last=null;return}
-  if(td===p.last) return; // 悬停格未变，不重算
-  p.last=td;
-  if(p.raf) cancelAnimationFrame(p.raf);
-  p.raf=requestAnimationFrame(function(){
-    clearDragPreview();
-    var cells=getRectCells(p.start.td,td);
-    for(var i=0;i<cells.length;i++) cells[i].classList.add('sel-preview');
-    _dragPreview=cells;
-  });
+  PointerDragController.onMove(e,td);
 });
-
-// 指针抬起：拖动提交选区 / 长按保留选中 / 单击交给click处理
 document.addEventListener('pointerup',function(e){
-  var p=_ptr;if(!p||!p.start) return;
-  if(p.timer) clearTimeout(p.timer);
-  if(p.raf) cancelAnimationFrame(p.raf);
-  var endTd=e.target.closest('td.att');
-  if(p.moved&&endTd&&endTd!==p.start.td){
-    // 拖动划选：矩形内格子加入选中
-    var cells=getRectCells(p.start.td,endTd);
-    for(var i=0;i<cells.length;i++){var c=cells[i];if(!c.classList.contains('selected')) selAdd(c)}
-    _lastPtrDragAt=Date.now();
-    if(cells.length>0) showToast('已选 '+selCount()+' 格，点状态按钮批量填入');
-  }else if(p.longPress&&endTd){
-    // 长按未拖动：起点已选中，抑制残留click
-    _lastPtrDragAt=Date.now();
-  }
-  clearDragPreview();
-  updateBatchBar();
-  _ptr.start=null;
+  var td=e.target.closest('td.att');
+  PointerDragController.onUp(e,td);
 });
+document.addEventListener('pointercancel',function(){PointerDragController.cancel();});
+// 浏览器失焦/切后台 → 自动清理（防卡死）
+window.addEventListener('blur',function(){PointerDragController.cancel();});
+document.addEventListener('visibilitychange',function(){if(document.hidden) PointerDragController.cancel();});
 
 // ====== 悬停十字定位高亮（行+列） ======
 var _hlCells=[],_hlThs=[],_hlRow=null,_lastHlTd=null;
@@ -3055,7 +3166,7 @@ document.addEventListener('mouseover',function(e){
   if(td===_lastHlTd) return; // 同一格内部移动，不重算
   _lastHlTd=td;
   // 拖动划选期间或已有选中格时，禁用十字高亮（避免橙色遮盖蓝色选中/状态色）
-  if(_ptr.start||Object.keys(selectedCells).length>0){
+  if(PointerDragController.isActive()||selCount()>0){
     clearCrossHL();
     return;
   }
@@ -3447,7 +3558,7 @@ document.addEventListener('click',function(e){
   if(e.target.closest('td.att')) return;
   if(e.target.closest('#batch-bar')) return;
   if(e.target.closest('#btn-recycle')) return;
-  if(Object.keys(selectedCells).length>0) batchClearSel();
+  if(selCount()>0) batchClearSel();
 });
 
 })();
