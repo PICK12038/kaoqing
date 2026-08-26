@@ -408,6 +408,23 @@ td.name input{width:100%;border:none;text-align:center;font-size:14px;font-weigh
   .nav-box .row{flex-direction:column;align-items:flex-start}
 }
 
+/* ===== 单元格多选 + 批量填充 ===== */
+td.att{user-select:none}
+td.att.sel{box-shadow:inset 0 0 0 2px var(--accent);background:#e8f0fe}
+.batch-quick{position:fixed;left:50%;bottom:18px;transform:translateX(-50%) translateY(140%);
+  display:flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--border);
+  border-radius:12px;padding:9px 13px;box-shadow:0 8px 28px rgba(0,0,0,.18);z-index:60;
+  transition:transform .18s ease;max-width:94vw;flex-wrap:wrap}
+.batch-quick.show{transform:translateX(-50%) translateY(0)}
+.bq-count{font-size:13px;font-weight:700;color:var(--accent);white-space:nowrap}
+.bq-sep{width:1px;height:22px;background:var(--border);margin:0 2px}
+.bq-status{display:flex;gap:5px;flex-wrap:wrap}
+.bq-st{border:none;border-radius:7px;padding:6px 9px;font-size:12px;font-weight:600;cursor:pointer;color:#fff;font-family:var(--ff)}
+.bq-st:hover{filter:brightness(.94)}
+.bq-btn{border:1px solid var(--border);background:var(--panel);border-radius:7px;padding:6px 10px;font-size:12px;cursor:pointer;color:var(--text);font-family:var(--ff)}
+.bq-btn:hover{filter:brightness(.96)}
+.bq-btn.danger{color:#c0392b;border-color:#f0c9c4}
+
 </style>
 </head>
 <body>
@@ -659,6 +676,17 @@ td.name input{width:100%;border:none;text-align:center;font-size:14px;font-weigh
 
 
 <!-- ====== 云同步配置弹窗（已删除） ====== -->
+
+<!-- ====== 单元格多选 · 批量填充浮动条 ====== -->
+<div id="batch-quick" class="batch-quick" role="toolbar" aria-label="批量填充考勤">
+  <span class="bq-count" id="bq-count">已选 0</span>
+  <span class="bq-sep"></span>
+  <div class="bq-status" id="bq-status"></div>
+  <span class="bq-sep"></span>
+  <button class="bq-btn" id="bq-selectall" type="button">全选本表</button>
+  <button class="bq-btn danger" id="bq-clear" type="button">清除填入</button>
+  <button class="bq-btn" id="bq-cancel" type="button">取消选择</button>
+</div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 
@@ -1110,8 +1138,8 @@ function renderGroupSection(gn,ct){
         var gd=weekStart+d; // 全局日期索引
         var k=gd+'_'+p,v=(data[r]&&data[r][k])||'',st=STATUS[v]||{};
         var sty=st.bg?'background:'+st.bg+';color:'+st.fc:'';
-        var sk=cName+'_'+gn+'_'+r+'_'+k;
-        h+='<td class="att" data-r="'+r+'" data-k="'+k+'" data-g="'+gn+'" data-c="'+cName+'" data-status="'+(v||'')+'">';
+        var sk=cName+'|'+gn+'|'+r+'|'+k;
+        h+='<td class="att'+(_selHas(sk)?' sel':'')+'" data-r="'+r+'" data-k="'+k+'" data-g="'+gn+'" data-c="'+cName+'" data-status="'+(v||'')+'">';
         h+='<div class="val" style="'+(st.bg?'background:'+st.bg+';color:'+st.fc:'')+'">'+(v||'')+'</div><div class="dd-arrow" onclick="event.stopPropagation();onAttMenu(event,this.parentElement)">▾</div></td>';
       }
     }
@@ -2728,6 +2756,142 @@ document.addEventListener('contextmenu',function(e){
   var td=e.target.closest('td.att');if(!td) return;
   e.preventDefault();onAttMenu(e,td);
 });
+
+// ====== 单元格多选 + 批量填充（直接在原表上操作） ======
+// 选中数据源：_selSet（键 = cn|gn|r|k）。渲染时通过 _selHas 恢复高亮。
+var _selSet=new Set();
+function _attKey(cn,gn,r,k){return cn+'|'+gn+'|'+r+'|'+k}
+function _selHas(key){return _selSet.has(key)}
+function _selToggle(key){if(_selSet.has(key))_selSet.delete(key);else _selSet.add(key)}
+function _selClear(){_selSet.clear();_refreshSelClasses();_syncSelBar()}
+
+var _bqEl=document.getElementById('batch-quick');
+var _bqCount=document.getElementById('bq-count');
+var _bqStatus=document.getElementById('bq-status');
+
+function _refreshSelClasses(){
+  var tds=document.querySelectorAll('td.att');
+  for(var i=0;i<tds.length;i++){
+    var td=tds[i];
+    var key=_attKey(td.getAttribute('data-c'),td.getAttribute('data-g'),td.getAttribute('data-r'),td.getAttribute('data-k'));
+    if(_selSet.has(key)) td.classList.add('sel'); else td.classList.remove('sel');
+  }
+}
+function _syncSelBar(){
+  var n=_selSet.size;
+  if(_bqCount)_bqCount.textContent='已选 '+n;
+  if(_bqEl)_bqEl.classList.toggle('show',n>0);
+}
+
+function _selectAllInTable(){
+  _selSet.clear();
+  var tds=document.querySelectorAll('td.att');
+  for(var i=0;i<tds.length;i++){
+    var td=tds[i];
+    _selSet.add(_attKey(td.getAttribute('data-c'),td.getAttribute('data-g'),td.getAttribute('data-r'),td.getAttribute('data-k')));
+  }
+  _refreshSelClasses();_syncSelBar();
+}
+
+// 矩形划选（仅限同班级同组）
+function _selectRect(s){
+  function kNum(kk){var a=String(kk).split('_');return parseInt(a[0],10)*100+parseInt(a[1],10);}
+  var r1=parseInt(s.r,10),r2=parseInt(s.curR,10);
+  var loR=Math.min(r1,r2),hiR=Math.max(r1,r2);
+  var loK=Math.min(kNum(s.k),kNum(s.curK)),hiK=Math.max(kNum(s.k),kNum(s.curK));
+  _selSet.clear();
+  var tds=document.querySelectorAll('td.att');
+  for(var i=0;i<tds.length;i++){
+    var td=tds[i];
+    if(td.getAttribute('data-c')!==s.cn||td.getAttribute('data-g')!==s.gn)continue;
+    var rr=parseInt(td.getAttribute('data-r'),10),kk=td.getAttribute('data-k'),kn=kNum(kk);
+    if(rr>=loR&&rr<=hiR&&kn>=loK&&kn<=hiK){
+      _selSet.add(_attKey(s.cn,s.gn,td.getAttribute('data-r'),kk));
+    }
+  }
+  _refreshSelClasses();_syncSelBar();
+}
+
+// 批量写入选中格（直接写 DB + 统一重渲染，避免刷屏日志）
+function _batchFillStatus(st){
+  if(_selSet.size===0){showToast('请先选择单元格');return;}
+  var count=0;
+  _selSet.forEach(function(key){
+    var p=key.split('|');var cn=p[0],gn=p[1],r=p[2],k=p[3];
+    var td=document.querySelector('td.att[data-c="'+cn+'"][data-g="'+gn+'"][data-r="'+r+'"][data-k="'+k+'"]');
+    if(!td)return;
+    var t=getTableByGroup(gn,cn);if(!t)return;
+    if(st){if(!t.data[r])t.data[r]={rm:''};t.data[r][k]=st;}
+    else if(t.data[r]){delete t.data[r][k];}
+    count++;
+  });
+  saveDB();
+  renderAllGroups(); // 重算周考勤并恢复选中高亮
+  addLog('批量考勤',currentClass+' 对 '+count+' 个单元格'+(st?(' 设为「'+st+'」'):' 清除'));
+  showToast('✅ 已批量'+(st?('设为「'+st+'」'):'清除')+' '+count+' 格');
+  _refreshSelClasses();_syncSelBar();
+}
+
+function _initBatchQuick(){
+  if(_bqStatus){
+    SN.forEach(function(s){
+      var st=STATUS[s];
+      var b=document.createElement('button');
+      b.className='bq-st';b.type='button';b.textContent=s;
+      b.style.background=st.bg||'#888';b.style.color=st.fc||'#fff';
+      b.addEventListener('click',function(){_batchFillStatus(s)});
+      _bqStatus.appendChild(b);
+    });
+  }
+  var clr=document.getElementById('bq-clear');
+  if(clr)clr.addEventListener('click',function(){_batchFillStatus('')});
+  var sa=document.getElementById('bq-selectall');
+  if(sa)sa.addEventListener('click',_selectAllInTable);
+  var cc=document.getElementById('bq-cancel');
+  if(cc)cc.addEventListener('click',_selClear);
+  _syncSelBar();
+}
+
+// 指针交互：单击切换 + 拖动矩形划选
+var _pd=null,_clickTimer=null,_rafPending=false;
+document.addEventListener('pointerdown',function(e){
+  var td=e.target.closest('td.att');if(!td)return;
+  if(e.target.closest('.dd-arrow'))return;
+  _pd={cn:td.getAttribute('data-c'),gn:td.getAttribute('data-g'),r:td.getAttribute('data-r'),k:td.getAttribute('data-k'),moved:false};
+});
+document.addEventListener('pointermove',function(e){
+  if(!_pd)return;
+  var el=document.elementFromPoint(e.clientX,e.clientY);
+  var td=el&&el.closest?el.closest('td.att'):null;if(!td)return;
+  if(td.getAttribute('data-c')!==_pd.cn||td.getAttribute('data-g')!==_pd.gn)return;
+  _pd.moved=true;_pd.curR=td.getAttribute('data-r');_pd.curK=td.getAttribute('data-k');
+  if(_rafPending)return;
+  _rafPending=true;
+  requestAnimationFrame(function(){_rafPending=false;if(_pd)_selectRect(_pd);});
+});
+document.addEventListener('pointerup',function(e){
+  if(!_pd)return;
+  if(!_pd.moved){
+    var key=_attKey(_pd.cn,_pd.gn,_pd.r,_pd.k);
+    if(_clickTimer){clearTimeout(_clickTimer);_clickTimer=null;return;} // 双击序列：交予 dblclick 处理
+    _clickTimer=setTimeout(function(){
+      _selToggle(key);_refreshSelClasses();_syncSelBar();_clickTimer=null;
+    },230);
+  }
+  _pd=null;
+});
+
+// 键盘：Esc 清空选择；Ctrl/⌘+A 全选本表（输入框内不拦截）
+document.addEventListener('keydown',function(e){
+  if(e.key==='Escape'){_selClear();}
+  else if((e.ctrlKey||e.metaKey)&&(e.key==='a'||e.key==='A')){
+    var ac=document.activeElement;
+    if(ac&&(ac.tagName==='INPUT'||ac.tagName==='TEXTAREA'))return;
+    e.preventDefault();_selectAllInTable();
+  }
+});
+
+_initBatchQuick();
 
 // ====== 悬停十字定位高亮（行+列） ======
 var _hlCells=[],_hlThs=[],_hlRow=null,_lastHlTd=null;
