@@ -1145,7 +1145,7 @@ function renderGroupSection(gn,ct){
     }
     var wk=calcWeeklyForWeek(data,r,weekStart,dates.length,nPer);
     var isFull=wk.t.indexOf('全勤')>-1;
-    h+='<td class="weekly" style="background:'+wk.bg+';color:'+wk.fc+'">'+
+    h+='<td class="weekly" data-r="'+r+'" data-g="'+gn+'" data-c="'+cName+'" style="background:'+wk.bg+';color:'+wk.fc+'">'+
       (isFull?'<span class="full-star">★</span> 全勤':('<span class="has-issue">'+escH(wk.t)+'</span>'))+'</td>';
     h+='</tr>';
   }
@@ -2729,14 +2729,24 @@ document.addEventListener('keydown',function(e){
   }
 });
 
-// 选中状态集合：提前初始化，确保下方启动期 render 安全访问（否则 _selSet 为 undefined 会白屏）
-var _selSet=new Set();
+// ===== 应用状态（单向数据流雏形：选中态收敛到 AppState，DOM 由 state 派生） =====
+var AppState={ selection:new Set(), drag:null };
+var _selSet=AppState.selection; // 别名：选中态已收敛到 AppState，保留历史函数兼容
 
-// ====== 启动 ======
-initDB();
-renderClassTabs();
-renderAllGroups();
-setupDragDrop();
+// ===== 全局错误边界：单点异常不再导致整页白屏 =====
+window.addEventListener('error',function(e){
+  if(window.__attErrLock) return; window.__attErrLock=true;
+  try{ console.error('[考勤系统] 运行时异常已隔离：',(e&&e.message)||e,(e&&e.error)||null); }catch(_){}
+  try{ showToast('⚠ 发生异常已被隔离，刷新页面可恢复'); }catch(_){}
+  setTimeout(function(){ window.__attErrLock=false; },2500);
+});
+
+// ====== 启动（每步独立兜底，单步失败不阻断其余初始化） ======
+function _safe(fn,name){ try{ fn(); }catch(err){ console.error('[启动] '+name+' 失败：',err); try{ showToast('⚠ '+name+' 初始化失败'); }catch(_){} } }
+_safe(initDB,'initDB');
+_safe(renderClassTabs,'renderClassTabs');
+_safe(renderAllGroups,'renderAllGroups');
+_safe(setupDragDrop,'setupDragDrop');
 // 周导航事件绑定
 var wnPrev=document.getElementById('wn-prev'),wnNext=document.getElementById('wn-next'),wnToday=document.getElementById('wn-today');
 if(wnPrev) wnPrev.addEventListener('click',function(){goWeek(-1)});
@@ -2814,24 +2824,43 @@ function _selectRect(s){
   _refreshSelClasses();_syncSelBar();
 }
 
-// 批量写入选中格（直接写 DB + 统一重渲染，避免刷屏日志）
+// 细粒度更新：只重算并 patch 受影响的本周汇总格（不重建整表）
+function _patchWeekly(cn,gn,r){
+  var wtd=document.querySelector('td.weekly[data-c="'+cn+'"][data-g="'+gn+'"][data-r="'+r+'"]');
+  if(!wtd) return;
+  var t=getTableByGroup(gn,cn); if(!t) return;
+  var wk=calcWeeklyForWeek(t.data, r, currentWeek*WEEK_SIZE, WEEK_SIZE, safePeriods().length);
+  var isFull=wk.t.indexOf('全勤')>-1;
+  wtd.style.background=wk.bg; wtd.style.color=wk.fc;
+  wtd.innerHTML=isFull?'<span class="full-star">★</span> 全勤':('<span class="has-issue">'+escH(wk.t)+'</span>');
+}
+
+// 批量写入选中格（细粒度：直接 patch 单元格 + 受影响周汇总，不再全量重建 DOM）
 function _batchFillStatus(st){
-  if(_selSet.size===0){showToast('请先选择单元格');return;}
-  var count=0;
-  _selSet.forEach(function(key){
+  if(AppState.selection.size===0){showToast('请先选择单元格');return;}
+  var count=0, weeklyNeed={};
+  AppState.selection.forEach(function(key){
     var p=key.split('|');var cn=p[0],gn=p[1],r=p[2],k=p[3];
     var td=document.querySelector('td.att[data-c="'+cn+'"][data-g="'+gn+'"][data-r="'+r+'"][data-k="'+k+'"]');
     if(!td)return;
     var t=getTableByGroup(gn,cn);if(!t)return;
-    if(st){if(!t.data[r])t.data[r]={rm:''};t.data[r][k]=st;}
-    else if(t.data[r]){delete t.data[r][k];}
-    count++;
+    if(st){ if(!t.data[r]) t.data[r]={rm:''}; t.data[r][k]=st; }
+    else if(t.data[r]){ delete t.data[r][k]; }
+    var s=STATUS[st]||{};
+    td.dataset.status=st||'';
+    var val=td.querySelector('.val');
+    if(val){ val.textContent=st||''; val.style.background=s.bg||''; val.style.color=s.fc||''; }
+    weeklyNeed[cn+'|'+gn+'|'+r]=true; count++;
+  });
+  // 重算受影响的本周汇总（细粒度，仅命中行）
+  Object.keys(weeklyNeed).forEach(function(wk){
+    var p=wk.split('|'); _patchWeekly(p[0],p[1],p[2]);
   });
   saveDB();
-  renderAllGroups(); // 重算周考勤并恢复选中高亮
+  updateGlobalStats(); // 同步顶部统计（仅文本，开销可忽略）
   addLog('批量考勤',currentClass+' 对 '+count+' 个单元格'+(st?(' 设为「'+st+'」'):' 清除'));
   showToast('✅ 已批量'+(st?('设为「'+st+'」'):'清除')+' '+count+' 格');
-  _refreshSelClasses();_syncSelBar();
+  // 不调用 renderAllGroups：保留选中高亮与滚动位置，避免重建上万节点
 }
 
 function _initBatchQuick(){
