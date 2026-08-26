@@ -312,14 +312,6 @@ td.weekly .has-issue{font-size:13px;line-height:1.3}
 .date-picker .dp-actions button.clear-btn{color:var(--text2)}
 .date-picker .dp-actions button.custom-btn{color:var(--accent);font-weight:600}
 
-/* 选择系统 v3 - Excel 式蓝色选中 + 虚线预览 + 拖动光标 */
-td.att.selected{outline:2px solid #1F6FEB!important;outline-offset:-2px;z-index:2;background:rgba(31,111,235,.12)!important;box-shadow:none}
-td.att.sel-preview{background:rgba(31,111,235,.22)!important;z-index:1;outline:1px dashed rgba(31,111,235,.6);outline-offset:-2px}
-
-/* ===== 批量操作栏（始终显示，直接可用） ===== */
-.batch-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px 16px;background:#FFF5CC;border-bottom:1px solid #F0D060}
-.batch-bar span{font-size:13px;font-weight:600;color:#8B6914;margin-right:8px}
-
 /* ===== 图例 ===== */
 .legend{
   display:flex;flex-wrap:wrap;gap:4px 16px;
@@ -405,7 +397,7 @@ td.name input{width:100%;border:none;text-align:center;font-size:14px;font-weigh
 
 @media print{
   body{background:#fff;padding:0}
-  .topbar,.nav-box,.tbl-header,.panel-toggle,.panel-body,.toast,.batch-bar,.panel-header{display:none!important}
+  .topbar,.nav-box,.tbl-header,.panel-toggle,.panel-body,.toast,.panel-header{display:none!important}
   .card{box-shadow:none;border:1px solid #ddd;break-inside:avoid}
   @page{size:landscape;margin:.3cm}
 }
@@ -458,26 +450,6 @@ td.name input{width:100%;border:none;text-align:center;font-size:14px;font-weigh
     <span style="flex:1"></span>
     跳转 <input id="wn-jump" type="number" min="1" max="26" value="1" style="width:52px;padding:3px 6px;border:1px solid var(--border);border-radius:4px;font-size:13px;font-family:var(--ff);text-align:center;outline:none" onkeydown="if(event.key==='Enter')jumpWeek()"> 周
     <button class="wn-today" id="wn-today">📍 本周</button>
-  </div>
-
-  <!-- 多选批量操作栏 -->
-  <div class="batch-bar" id="batch-bar">
-    <span id="batch-count">按住左键拖动划选，已选 0 格</span>
-    <button class="btn btn-sm" onclick="batchSelectAll()">全选整组</button>
-    <button class="btn btn-sm" onclick="batchSelectRow()">整行</button>
-    <button class="btn btn-sm" onclick="batchSelectCol()">整列</button>
-    <button class="btn btn-sm" onclick="batchInvert()">反选</button>
-    <span class="tb-divider" style="margin:0 2px"></span>
-    <button class="btn btn-sm" style="background:var(--c-late);color:#fff;border-color:var(--c-late)" onclick="batchApplyQuick('迟到')">迟到</button>
-    <button class="btn btn-sm" style="background:var(--c-early);color:#fff;border-color:var(--c-early)" onclick="batchApplyQuick('早退')">早退</button>
-    <button class="btn btn-sm" style="background:var(--c-sick);color:#fff;border-color:var(--c-sick)" onclick="batchApplyQuick('病假')">病假</button>
-    <button class="btn btn-sm" style="background:var(--c-personal);color:#fff;border-color:var(--c-personal)" onclick="batchApplyQuick('事假')">事假</button>
-    <button class="btn btn-sm" style="background:var(--c-absent);color:#fff;border-color:var(--c-absent)" onclick="batchApplyQuick('旷课')">旷课</button>
-    <button class="btn btn-sm" style="background:var(--c-miss);color:#fff;border-color:var(--c-miss)" onclick="batchApplyQuick('缺勤')">缺勤</button>
-    <button class="btn btn-sm" onclick="batchApplyQuick('CLEAR')">清空状态</button>
-    <button class="btn btn-sm btn-r" onclick="batchDeleteStudents()">删除姓名</button>
-    <span class="tb-divider" style="margin:0 2px"></span>
-    <button class="btn btn-sm" onclick="batchClearSel()">取消选择</button>
   </div>
 
   <!-- 4组表格容器 -->
@@ -977,7 +949,6 @@ window.toggleViewMode=function(){
     ctEl.style.display='';gtEl.style.display='none';
     renderClassTabs();
   }
-  SelectionManager.clear();
   renderAllGroups();
 };
 
@@ -985,7 +956,6 @@ window.onGroupViewChange=function(gn){
   currentGroup=gn;
   var btns=document.querySelectorAll('#group-tabs .tab-group-btn');
   btns.forEach(function(b){b.classList.toggle('active',b.textContent===gn)});
-  SelectionManager.clear();
   renderAllGroups();
 };
 
@@ -994,7 +964,6 @@ window.onClassChange=function(ct){
   if(!ct||CLASS_TYPES.indexOf(ct)===-1) return;
   currentClass=ct;
   currentGroup='1组';
-  SelectionManager.clear();
   renderClassTabs();
   renderAllGroups();
   addLog('切换班级','切换到 '+ct);
@@ -1041,8 +1010,6 @@ function renderAllGroups(){
   document.querySelectorAll('.group-header').forEach(function(hd){
     hd.classList.toggle('active',hd.getAttribute('data-c')===currentClass&&hd.getAttribute('data-g')===currentGroup);
   });
-  updateBatchBar();
-  if(selCount()>0) document.getElementById('batch-count').textContent='已选 '+selCount()+' 格（可点状态按钮批量填入）';
   updateWeekNav();
   updateGlobalStats();
 }
@@ -1142,7 +1109,7 @@ function renderGroupSection(gn,ct){
         var k=gd+'_'+p,v=(data[r]&&data[r][k])||'',st=STATUS[v]||{};
         var sty=st.bg?'background:'+st.bg+';color:'+st.fc:'';
         var sk=cName+'_'+gn+'_'+r+'_'+k;
-        h+='<td class="att'+(selHas(sk)?' selected':'')+'" data-r="'+r+'" data-k="'+k+'" data-g="'+gn+'" data-c="'+cName+'" data-status="'+(v||'')+'">';
+        h+='<td class="att" data-r="'+r+'" data-k="'+k+'" data-g="'+gn+'" data-c="'+cName+'" data-status="'+(v||'')+'">';
         h+='<div class="val" style="'+(st.bg?'background:'+st.bg+';color:'+st.fc:'')+'">'+(v||'')+'</div><div class="dd-arrow" onclick="event.stopPropagation();onAttMenu(event,this.parentElement)">▾</div></td>';
       }
     }
@@ -1220,7 +1187,6 @@ window.goWeek=function(dir){
   var nw=currentWeek+dir;
   if(nw<0||nw>=TOTAL_WEEKS){showToast('已到边界');return}
   currentWeek=nw;
-  SelectionManager.clear();
   var jump=document.getElementById('wn-jump');if(jump) jump.value=currentWeek+1;
   renderAllGroups();
   showToast('▶ 已切换到第 '+(currentWeek+1)+' 周');
@@ -1664,238 +1630,6 @@ function findEt(eid){
   return null;
 }
 
-// ====== 多选系统 v3（SelectionManager + PointerDragController 工业级重构） ======
-// 架构：状态机模式 + 单数据源 + RAF 批量 DOM 同步 + 会话令牌防泄漏
-// 容错：null 安全、属性缺失回退、最大选择数限制、异常 try-catch
-
-window.batchApplyQuick=function(st){
-  var keys=SelectionManager.keys();
-  if(keys.length===0){showToast('请先点击格子选择');return}
-  saveDB(); // 确保任何挂起的保存先执行
-  var groups={},errorCount=0;
-  keys.forEach(function(key){
-    var info=SelectionManager.keyInfo(key);
-    if(!info.cn||!info.gn||!info.r||info.k===''){errorCount++;return}
-    if(!groups[info.cn]) groups[info.cn]={};
-    if(!groups[info.cn][info.gn]) groups[info.cn][info.gn]={};
-    if(!groups[info.cn][info.gn][info.r]) groups[info.cn][info.gn][info.r]={};
-    groups[info.cn][info.gn][info.r][info.k]=st==='CLEAR'?undefined:st;
-  });
-  Object.keys(groups).forEach(function(cn){
-    Object.keys(groups[cn]).forEach(function(gn){
-      var t=getTableByGroup(gn,cn);if(!t) return;
-      Object.keys(groups[cn][gn]).forEach(function(r){
-        if(!t.data[r]) t.data[r]={rm:''};
-        Object.keys(groups[cn][gn][r]).forEach(function(k){
-          if(groups[cn][gn][r][k]){t.data[r][k]=groups[cn][gn][r][k]}else{delete t.data[r][k]}
-        });
-      });
-    });
-  });
-  SelectionManager.clear();
-  var label=st==='CLEAR'?'清空':st;
-  saveDBForce();renderAllGroups();
-  updateBatchBar();
-  var _bc=document.getElementById('batch-count');if(_bc) _bc.textContent='按住左键拖动划选，已选 0 格';
-  addLog('批量操作','批量设置 '+keys.length+' 项为 '+label);
-  showToast('✅ 已批量设置 '+keys.length+' 项为 '+label);
-};
-
-// ====== SelectionManager 核心选择管理器 ======
-// 工业级状态管理：单数据源 + RAF 批量 DOM 同步 + 原型链隔离 + 安全上限
-var SelectionManager=(function(){
-  'use strict';
-  var _store=Object.create(null); // key→true（原型链隔离，防 __proto__ 注入）
-  var _rafPending=false;
-  var MAX_CELLS=8000; // 安全上限
-
-  function cellKey(td){
-    if(!td||td.nodeType!==1) return '';
-    var c=td.getAttribute('data-c')||'',g=td.getAttribute('data-g')||'',
-        r=td.getAttribute('data-r')||'',k=td.getAttribute('data-k')||'';
-    if(!c||!g||!r||k==='') return '';
-    return c+'_'+g+'_'+r+'_'+k;
-  }
-  function keyInfo(key){
-    if(typeof key!=='string'||!key) return{cn:'',gn:'',r:'',k:''};
-    var p=key.split('_');
-    return{cn:p[0]||'',gn:p[1]||'',r:p[2]||'',k:p.slice(3).join('_')};
-  }
-  function _count(){
-    var n=0;for(var k in _store){if(_store[k]) n++;}
-    return n;
-  }
-  function _keys(){
-    var a=[];for(var k in _store){if(_store[k]) a.push(k);}
-    return a;
-  }
-  function _scheduleSync(){
-    if(_rafPending) return;
-    if(typeof requestAnimationFrame!=='function') return;
-    _rafPending=true;
-    requestAnimationFrame(function(){
-      _rafPending=false;
-      try{
-        var tds=document.querySelectorAll('td.att');
-        for(var i=0,len=tds.length;i<len;i++){
-          var td=tds[i],k=cellKey(td);
-          if(!k) continue;
-          if(_store[k]) td.classList.add('selected');
-          else td.classList.remove('selected');
-        }
-      }catch(e){/* DOM 可能正在重建，下次 RAF 再同步 */}
-    });
-  }
-  return{
-    cellKey:cellKey, keyInfo:keyInfo,
-    count:_count, keys:_keys,
-    has:function(key){return!!_store[key];},
-    isSelectedForRender:function(key){return!!_store[key];},
-    clear:function(){_store=Object.create(null);_scheduleSync();},
-    resetForRender:function(){_store=Object.create(null);},
-    add:function(td){
-      var k=cellKey(td);if(!k) return false;
-      if(!_store[k]){
-        if(_count()>=MAX_CELLS) return false;
-        _store[k]=true;td.classList.add('selected');
-      }
-      return true;
-    },
-    remove:function(td){
-      var k=cellKey(td);if(!k) return;
-      if(_store[k]){delete _store[k];td.classList.remove('selected');}
-    },
-    toggle:function(td){
-      var k=cellKey(td);if(!k) return;
-      if(_store[k]){delete _store[k];td.classList.remove('selected');}
-      else{if(_count()>=MAX_CELLS) return;_store[k]=true;td.classList.add('selected');}
-    },
-    replace:function(td){
-      var k=cellKey(td);if(!k) return;
-      if(_store[k]&&_count()===1) return; // 已单选该格
-      // 新格立即显示（视觉即时反馈），旧格用 RAF 批量清理
-      if(_store[k]) td.classList.add('selected');
-      _store=Object.create(null);_store[k]=true;
-      _scheduleSync();
-    },
-    addBatch:function(tds){
-      if(!tds||!tds.length) return;
-      for(var i=0;i<tds.length;i++){
-        var k=cellKey(tds[i]);if(!k) continue;
-        if(!_store[k]){if(_count()>=MAX_CELLS) break;_store[k]=true;}
-      }
-      _scheduleSync();
-    },
-    applyInGroup:function(fn){
-      var sel=_gSel();if(!sel) return;
-      var tds;try{tds=document.querySelectorAll(sel+' td.att');}catch(e){return;}
-      for(var i=0;i<tds.length;i++) fn.call(this,tds[i]);
-      _scheduleSync();
-    }
-  };
-})();
-
-// ---- 向后兼容函数包装 ----
-function cellKey(td){return SelectionManager.cellKey(td);}
-function keyInfo(key){return SelectionManager.keyInfo(key);}
-function selCount(){return SelectionManager.count();}
-function selHas(key){return SelectionManager.has(key);}
-function selKeys(){return SelectionManager.keys();}
-function selClearAll(){SelectionManager.clear();}
-function selAdd(td){SelectionManager.add(td);}
-function selToggle(td){SelectionManager.toggle(td);}
-function selReplace(td){SelectionManager.replace(td);updateBatchBar();}
-function selApplyInGroup(fn){SelectionManager.applyInGroup(fn);updateBatchBar();}
-function _gSel(){
-  if(typeof viewMode==='undefined'||typeof currentClass==='undefined'||typeof currentGroup==='undefined') return '';
-  if(viewMode==='group') return '#group-'+String(currentClass).replace(/班/g,'b')+'-'+currentGroup;
-  return '#group-'+currentGroup;
-}
-function gSel(){return _gSel();}
-
-// 清空选择
-window.batchClearSel=function(){selClearAll();updateBatchBar();};
-
-// 更新批量操作栏
-function updateBatchBar(){
-  var bar=document.getElementById('batch-bar');if(!bar) return;
-  var bc=document.getElementById('batch-count');if(!bc) return;
-  var n=selCount();
-  if(n>0) bc.textContent='已选 '+n+' 格（点状态按钮填入，双击单格快速切换）';
-  else bc.textContent='单击选中 / 按住左键拖动划选，再点状态按钮填入';
-}
-
-window.batchSelectAll=function(){selApplyInGroup(selAdd)};
-window.batchSelectRow=function(){
-  var sel=gSel();if(!sel) return;
-  var rows;try{rows=document.querySelectorAll(sel+' .att-table tbody tr');}catch(e){return;}
-  rows.forEach(function(tr){tr.querySelectorAll('td.att').forEach(selAdd);});
-  updateBatchBar();
-};
-window.batchSelectCol=function(){
-  var ps=safePeriods(),dates=safeDates(getCurrentTable());
-  if(!dates.length) return;
-  var msg='选择要批量选中的日期：\n';
-  for(var d=0;d<dates.length;d++) msg+='['+(d+1)+'] '+(dates[d].d||('第'+(d+1)+'天'))+'\n';
-  msg+='输入数字：';
-  var choice=parseInt(prompt(msg,'1'),10);
-  if(isNaN(choice)||choice<1||choice>dates.length) return;
-  var dIdx=choice-1;
-  var sel=gSel();if(!sel) return;
-  var tds;try{tds=document.querySelectorAll(sel+' td.att');}catch(e){return;}
-  tds.forEach(function(td){
-    var k=td.getAttribute('data-k');if(!k) return;
-    var parts=k.split('_'),kd=parseInt(parts[0],10);
-    if(isNaN(kd)) return;
-    if(kd===dIdx) selAdd(td);
-  });
-  updateBatchBar();
-};
-window.batchInvert=function(){selApplyInGroup(selToggle)};
-
-// 批量删除学生
-window.batchDeleteStudents=function(){
-  var keys=selKeys();
-  if(!keys.length){showToast('请先选择要删除的学生的格子');return}
-  var studentsToDel=[];
-  keys.forEach(function(key){
-    var info=keyInfo(key),r=parseInt(info.r,10);
-    if(!isNaN(r)&&studentsToDel.indexOf(r)===-1) studentsToDel.push(r);
-  });
-  if(!studentsToDel.length){showToast('未识别到有效学生行');return}
-  studentsToDel.sort(function(a,b){return b-a});
-  
-  if(!confirm('确定删除 '+studentsToDel.length+' 名学生的姓名和所有考勤数据？\n行号：'+studentsToDel.join(', ')+'\n\n删除后移入回收站，180天内可恢复。')) return;
-  
-  var t=getCurrentTable();if(!t) return;
-  var backupStudents=[],backupData={},backupCustom={};
-  
-  studentsToDel.forEach(function(r){
-    var name=(t.students&&t.students[r-1])||'';
-    backupStudents.push({row:r,name:name});
-    if(t.data&&t.data[r]){backupData[r]=JSON.parse(JSON.stringify(t.data[r]));delete t.data[r]}
-    if(t.customData&&t.customData[r]){backupCustom[r]=JSON.parse(JSON.stringify(t.customData[r]));delete t.customData[r]}
-    if(t.students) t.students[r-1]='';
-  });
-  
-  if(t.students){
-    while(t.students.length>0&&!t.students[t.students.length-1].trim()) t.students.pop();
-  }
-  
-  if(Object.keys(backupData).length>0){
-    DB.recycleBin.push({
-      className:currentClass,groupName:currentGroup,
-      label:currentClass+' '+currentGroup+' 删除学生('+studentsToDel.length+'人)',
-      data:backupData,customData:backupCustom,
-      deletedAt:Date.now(),expiresAt:Date.now()+180*86400000
-    });
-  }
-  
-  SelectionManager.clear();saveDBForce();renderAllGroups();
-  updateBatchBar();
-  addLog('删除学生','删除 '+currentClass+' '+currentGroup+' '+studentsToDel.length+'人');
-  showToast('🗑 已删除 '+studentsToDel.length+' 名学生（移至回收站）');
-};
 
 // ====== 统一导入 ======
 window.openImportGroup=function(gn){
@@ -2959,11 +2693,9 @@ function showToast(msg){
 // ====== 快捷键 ======
 document.addEventListener('keydown',function(e){
   if(e.key==='Escape'){
-    // 优先关闭模态框
+    // 关闭模态框
     var mods=document.querySelectorAll('.modal-overlay.show');
     if(mods.length>0){mods.forEach(function(m){m.classList.remove('show')});return}
-    // 其次清除多选
-    if(selCount()>0){SelectionManager.clear();updateBatchBar();return}
   }
 });
 
@@ -2978,117 +2710,8 @@ if(wnPrev) wnPrev.addEventListener('click',function(){goWeek(-1)});
 if(wnNext) wnNext.addEventListener('click',function(){goWeek(1)});
 if(wnToday) wnToday.addEventListener('click',function(){goWeekToday()});
 
-// ====== PointerDragController 指针控制器（容错优先范式） ======
-// 单击=选中（单选替换），拖动=矩形划选；靠「移动距离阈值」清晰分离，移除长按消除误触。
-// 配合 pointercancel/blur/visibilitychange 自动清理、RAF 节流、跨表校验、选择上限。
-var PointerDragController=(function(){
-  'use strict';
-  var DRAG_THRESHOLD=6, CLICK_SUPPRESS_MS=220;
-  var _active=false, _start=null, _lastTd=null, _moved=false;
-  var _raf=null, _preview=[], _lastDragEnd=0;
-
-  function _clearPreview(){
-    for(var i=0;i<_preview.length;i++){if(_preview[i]) _preview[i].classList.remove('sel-preview');}
-    _preview=[];
-  }
-  function _getAttColumnRange(table){
-    if(!table) return null;
-    var tb=table.querySelector('tbody');
-    if(!tb||!tb.rows||tb.rows.length===0) return null;
-    var min=9999,max=-1;
-    try{
-      var tds=tb.querySelectorAll('td.att');
-      for(var i=0;i<tds.length;i++){
-        var cc=tds[i].cellIndex;
-        if(typeof cc!=='number') continue;
-        if(cc<min) min=cc;
-        if(cc>max) max=cc;
-      }
-    }catch(e){return null;}
-    if(max<min) return null;
-    return{min:min,max:max};
-  }
-  function _getRectCells(startTd,endTd){
-    if(!startTd||!endTd) return [];
-    var st=startTd.closest('table.att-table'),et=endTd.closest('table.att-table');
-    if(!st||st!==et) return []; // 跨表不允许
-    var r1=parseInt(startTd.getAttribute('data-r'),10),r2=parseInt(endTd.getAttribute('data-r'),10);
-    if(isNaN(r1)||isNaN(r2)) return [];
-    var c1=startTd.cellIndex,c2=endTd.cellIndex;
-    if(typeof c1!=='number'||typeof c2!=='number') return [];
-    var attCols=_getAttColumnRange(st);
-    if(!attCols) return [];
-    var minC=Math.max(Math.min(c1,c2),attCols.min),maxC=Math.min(Math.max(c1,c2),attCols.max);
-    if(minC>maxC) return [];
-    var minR=Math.min(r1,r2),maxR=Math.max(r1,r2),out=[];
-    var tds;
-    try{tds=st.querySelectorAll('tbody td.att');}catch(e){return [];}
-    for(var i=0;i<tds.length;i++){
-      var td=tds[i],rr=parseInt(td.getAttribute('data-r'),10);
-      if(isNaN(rr)||rr<minR||rr>maxR) continue;
-      var cc=td.cellIndex;
-      if(cc<minC||cc>maxC) continue;
-      out.push(td);
-    }
-    return out;
-  }
-  function _end(){
-    _active=false;_start=null;_lastTd=null;_moved=false;
-    _clearPreview();
-    if(typeof updateBatchBar==='function') updateBatchBar();
-  }
-  return{
-    isActive:function(){return _active;},
-    shouldSuppressClick:function(){return Date.now()-_lastDragEnd<CLICK_SUPPRESS_MS;},
-  onDown:function(e,td){
-      if(e.button!==0||!td) return;
-      _active=true;_moved=false;
-      _start={td:td,x:e.clientX,y:e.clientY};
-      _lastTd=td;
-    },
-    onMove:function(e,td){
-      if(!_active||!_start) return;
-      if(!_moved){
-        var dx=Math.abs(e.clientX-_start.x),dy=Math.abs(e.clientY-_start.y);
-        if(dx<=DRAG_THRESHOLD&&dy<=DRAG_THRESHOLD) return;
-        _moved=true;
-      }
-      if(!td){_clearPreview();_lastTd=null;return;}
-      if(td===_lastTd) return;
-      _lastTd=td;
-      if(_raf) cancelAnimationFrame(_raf);
-      _raf=requestAnimationFrame(function(){
-        _raf=null;_clearPreview();
-        var cells=_getRectCells(_start.td,td);
-        for(var i=0;i<cells.length;i++) cells[i].classList.add('sel-preview');
-        _preview=cells;
-      });
-    },
-    onUp:function(e,td){
-      if(!_active||!_start){_end();return;}
-      if(_raf){cancelAnimationFrame(_raf);_raf=null;}
-      if(_moved&&td&&td!==_start.td){
-        var cells=_getRectCells(_start.td,td);
-        SelectionManager.addBatch(cells);
-        _lastDragEnd=Date.now();
-        if(cells.length>0&&typeof showToast==='function') showToast('已选 '+selCount()+' 格，点状态按钮批量填入');
-      }
-      _end();
-    },
-    cancel:function(){if(_active) _end();}
-  };
-})();
-
-// ====== 事件委托层 v3 ======
-// 单击 = 单选选中该格（不立即改状态）
-document.addEventListener('click',function(e){
-  var td=e.target.closest('td.att');if(!td) return;
-  if(e.target.closest('.dd-arrow')) return;
-  if(PointerDragController.shouldSuppressClick()) return;
-  SelectionManager.replace(td);
-  updateBatchBar();
-});
-// 双击 = 循环切换状态
+// ====== 单格编辑交互（无多选） ======
+// 双击 = 循环切换该格状态（无需选中）
 document.addEventListener('dblclick',function(e){
   var td=e.target.closest('td.att');if(!td) return;
   if(e.target.closest('.dd-arrow')) return;
@@ -3097,33 +2720,12 @@ document.addEventListener('dblclick',function(e){
   var cur=td.getAttribute('data-status')||'';
   var idx=CYCLE.indexOf(cur)+1;if(idx>=CYCLE.length) idx=0;
   updateAttCell(t,td,r,k,gn,CYCLE[idx],cur||'(空)');
-  if(!td.classList.contains('selected')) SelectionManager.replace(td);
 });
-// 右键菜单
+// 右键菜单 = 选择状态（无需选中）
 document.addEventListener('contextmenu',function(e){
   var td=e.target.closest('td.att');if(!td) return;
   e.preventDefault();onAttMenu(e,td);
 });
-// 指针事件
-document.addEventListener('pointerdown',function(e){
-  if(e.button!==0) return;
-  var td=e.target.closest('td.att');if(!td) return;
-  if(e.target.closest('.dd-arrow')) return;
-  PointerDragController.onDown(e,td);
-});
-document.addEventListener('pointermove',function(e){
-  if(!PointerDragController.isActive()) return;
-  var td=e.target.closest('td.att');
-  PointerDragController.onMove(e,td);
-});
-document.addEventListener('pointerup',function(e){
-  var td=e.target.closest('td.att');
-  PointerDragController.onUp(e,td);
-});
-document.addEventListener('pointercancel',function(){PointerDragController.cancel();});
-// 浏览器失焦/切后台 → 自动清理（防卡死）
-window.addEventListener('blur',function(){PointerDragController.cancel();});
-document.addEventListener('visibilitychange',function(){if(document.hidden) PointerDragController.cancel();});
 
 // ====== 悬停十字定位高亮（行+列） ======
 var _hlCells=[],_hlThs=[],_hlRow=null,_lastHlTd=null;
@@ -3139,11 +2741,6 @@ document.addEventListener('mouseover',function(e){
   if(!td){_lastHlTd=null;clearCrossHL();return}
   if(td===_lastHlTd) return; // 同一格内部移动，不重算
   _lastHlTd=td;
-  // 拖动划选期间或已有选中格时，禁用十字高亮（避免橙色遮盖蓝色选中/状态色）
-  if(PointerDragController.isActive()||selCount()>0){
-    clearCrossHL();
-    return;
-  }
   clearCrossHL();
   var table=td.closest('table.att-table');if(!table) return;
   var tr=td.closest('tr');if(!tr) return;
@@ -3525,14 +3122,6 @@ document.addEventListener('click',function(e){
   if(wrap&&!wrap.contains(e.target)){
     document.getElementById('search-result').classList.remove('show');
   }
-});
-
-// 点击空白处（非考勤格、非批量栏、非批量按钮）清除多选
-document.addEventListener('click',function(e){
-  if(e.target.closest('td.att')) return;
-  if(e.target.closest('#batch-bar')) return;
-  if(e.target.closest('#btn-recycle')) return;
-  if(selCount()>0) batchClearSel();
 });
 
 })();
