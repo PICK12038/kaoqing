@@ -2729,6 +2729,9 @@ document.addEventListener('keydown',function(e){
   }
 });
 
+// 选中状态集合：提前初始化，确保下方启动期 render 安全访问（否则 _selSet 为 undefined 会白屏）
+var _selSet=new Set();
+
 // ====== 启动 ======
 initDB();
 renderClassTabs();
@@ -2758,8 +2761,7 @@ document.addEventListener('contextmenu',function(e){
 });
 
 // ====== 单元格多选 + 批量填充（直接在原表上操作） ======
-// 选中数据源：_selSet（键 = cn|gn|r|k）。渲染时通过 _selHas 恢复高亮。
-var _selSet=new Set();
+// 选中数据源：_selSet（键 = cn|gn|r|k），已在启动块前初始化。渲染时通过 _selHas 恢复高亮。
 function _attKey(cn,gn,r,k){return cn+'|'+gn+'|'+r+'|'+k}
 function _selHas(key){return _selSet.has(key)}
 function _selToggle(key){if(_selSet.has(key))_selSet.delete(key);else _selSet.add(key)}
