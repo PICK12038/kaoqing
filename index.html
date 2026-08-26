@@ -315,8 +315,6 @@ td.weekly .has-issue{font-size:13px;line-height:1.3}
 /* 选择系统 v3 - Excel 式蓝色选中 + 虚线预览 + 拖动光标 */
 td.att.selected{outline:2px solid #1F6FEB!important;outline-offset:-2px;z-index:2;background:rgba(31,111,235,.12)!important;box-shadow:none}
 td.att.sel-preview{background:rgba(31,111,235,.22)!important;z-index:1;outline:1px dashed rgba(31,111,235,.6);outline-offset:-2px}
-body.sel-dragging{user-select:none!important;-webkit-user-select:none!important;cursor:crosshair!important}
-body.sel-dragging td.att{cursor:crosshair!important}
 
 /* ===== 批量操作栏（始终显示，直接可用） ===== */
 .batch-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px 16px;background:#FFF5CC;border-bottom:1px solid #F0D060}
@@ -2980,16 +2978,14 @@ if(wnPrev) wnPrev.addEventListener('click',function(){goWeek(-1)});
 if(wnNext) wnNext.addEventListener('click',function(){goWeek(1)});
 if(wnToday) wnToday.addEventListener('click',function(){goWeekToday()});
 
-// ====== PointerDragController 指针状态机 v3 ======
-// 状态机：IDLE→PENDING→DRAGGING→IDLE + pointercancel/blur/visibilitychange 自动清理
-// 会话令牌（_session）防止过期回调、RAF 节流、距离阈值、长按定时器
+// ====== PointerDragController 指针控制器（容错优先范式） ======
+// 单击=选中（单选替换），拖动=矩形划选；靠「移动距离阈值」清晰分离，移除长按消除误触。
+// 配合 pointercancel/blur/visibilitychange 自动清理、RAF 节流、跨表校验、选择上限。
 var PointerDragController=(function(){
   'use strict';
-  var STATE={IDLE:0,PENDING:1,DRAGGING:2};
-  var DRAG_THRESHOLD=6, LONGPRESS_MS=350, CLICK_SUPPRESS_MS=250;
-  var _state=STATE.IDLE, _session=0, _start=null, _lastTd=null;
-  var _moved=false, _longPressTimer=null, _raf=null, _lastDragEnd=0;
-  var _preview=[];
+  var DRAG_THRESHOLD=6, CLICK_SUPPRESS_MS=220;
+  var _active=false, _start=null, _lastTd=null, _moved=false;
+  var _raf=null, _preview=[], _lastDragEnd=0;
 
   function _clearPreview(){
     for(var i=0;i<_preview.length;i++){if(_preview[i]) _preview[i].classList.remove('sel-preview');}
@@ -3036,46 +3032,27 @@ var PointerDragController=(function(){
     }
     return out;
   }
-  function _reset(){
-    if(_longPressTimer){clearTimeout(_longPressTimer);_longPressTimer=null;}
-    if(_raf){if(typeof cancelAnimationFrame==='function') cancelAnimationFrame(_raf);_raf=null;}
+  function _end(){
+    _active=false;_start=null;_lastTd=null;_moved=false;
     _clearPreview();
-    document.body.classList.remove('sel-dragging');
-    _state=STATE.IDLE;_start=null;_lastTd=null;_moved=false;
     if(typeof updateBatchBar==='function') updateBatchBar();
   }
   return{
-    STATE:STATE,
-    isDragging:function(){return _state===STATE.DRAGGING;},
-    isPending:function(){return _state===STATE.PENDING;},
-    isActive:function(){return _state!==STATE.IDLE;},
+    isActive:function(){return _active;},
     shouldSuppressClick:function(){return Date.now()-_lastDragEnd<CLICK_SUPPRESS_MS;},
-    onDown:function(e,td){
+  onDown:function(e,td){
       if(e.button!==0||!td) return;
-      _session++;var sid=_session;
-      _state=STATE.PENDING;
+      _active=true;_moved=false;
       _start={td:td,x:e.clientX,y:e.clientY};
-      _lastTd=td;_moved=false;_longPressTimer=null;
-      _longPressTimer=setTimeout(function(){
-        if(sid!==_session||_state===STATE.IDLE) return;
-        if(_state===STATE.PENDING){
-          _state=STATE.DRAGGING;
-          document.body.classList.add('sel-dragging');
-          SelectionManager.add(_start.td);
-          if(typeof showToast==='function') showToast('已选中，继续拖动可扩展选区');
-        }
-      },LONGPRESS_MS);
+      _lastTd=td;
     },
     onMove:function(e,td){
-      if(_state===STATE.IDLE||!_start) return;
-      if(_state===STATE.PENDING){
+      if(!_active||!_start) return;
+      if(!_moved){
         var dx=Math.abs(e.clientX-_start.x),dy=Math.abs(e.clientY-_start.y);
         if(dx<=DRAG_THRESHOLD&&dy<=DRAG_THRESHOLD) return;
-        _state=STATE.DRAGGING;_moved=true;
-        if(_longPressTimer){clearTimeout(_longPressTimer);_longPressTimer=null;}
-        document.body.classList.add('sel-dragging');
+        _moved=true;
       }
-      if(_state!==STATE.DRAGGING) return;
       if(!td){_clearPreview();_lastTd=null;return;}
       if(td===_lastTd) return;
       _lastTd=td;
@@ -3088,20 +3065,17 @@ var PointerDragController=(function(){
       });
     },
     onUp:function(e,td){
-      if(_state===STATE.IDLE||!_start){_reset();return;}
-      if(_longPressTimer){clearTimeout(_longPressTimer);_longPressTimer=null;}
+      if(!_active||!_start){_end();return;}
       if(_raf){cancelAnimationFrame(_raf);_raf=null;}
-      if(_state===STATE.DRAGGING&&td&&td!==_start.td){
+      if(_moved&&td&&td!==_start.td){
         var cells=_getRectCells(_start.td,td);
         SelectionManager.addBatch(cells);
         _lastDragEnd=Date.now();
         if(cells.length>0&&typeof showToast==='function') showToast('已选 '+selCount()+' 格，点状态按钮批量填入');
-      }else if(_state===STATE.DRAGGING){
-        _lastDragEnd=Date.now();
       }
-      _reset();
+      _end();
     },
-    cancel:function(){if(_state!==STATE.IDLE) _reset();}
+    cancel:function(){if(_active) _end();}
   };
 })();
 
